@@ -31,6 +31,9 @@ try {
   // Run pyright on the whole project (doesn't work well with individual files)
   await $`uv run pyright .`.cwd("./python");
 
+  // Validate EXTRA_IMPORTS is up-to-date
+  await $`./scripts/validate_extra_imports.sh`.cwd("./python");
+
   await $`bun run codespell`;
 
   process.exit(0);
