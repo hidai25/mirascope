@@ -48,6 +48,7 @@ import { Stripe, type StripeConfig } from "@/payments/client";
 import { Customers } from "@/payments/customers";
 import { Router } from "@/payments/products/router";
 import { dependencyProvider, type Ready } from "@/utils";
+import { DrizzleORM } from "@/db/client";
 
 /**
  * Payments service layer.
@@ -88,15 +89,17 @@ export class Payments extends Context.Tag("Payments")<
   /**
    * Default layer that creates the Payments service.
    *
-   * Requires Stripe to be provided. The dependency provider automatically
-   * provides Stripe to service methods, removing it from method signatures.
+   * Requires Stripe and DrizzleORM to be provided. The dependency provider automatically
+   * provides these dependencies to service methods, removing them from method signatures.
    */
   static Default = Layer.effect(
     Payments,
     Effect.gen(function* () {
       const stripe = yield* Stripe;
+      const db = yield* DrizzleORM;
       const provideDependencies = dependencyProvider([
         { tag: Stripe, instance: stripe },
+        { tag: DrizzleORM, instance: db },
       ]);
 
       return {
@@ -109,22 +112,28 @@ export class Payments extends Context.Tag("Payments")<
   );
 
   /**
-   * Creates a fully configured layer with Stripe connection.
+   * Creates a fully configured layer with Stripe and database connections.
    *
-   * This is the standard way to use Payments. Provide Stripe configuration
-   * and get back a layer that provides the Payments service with no dependencies.
+   * This requires DrizzleORM to be provided externally (typically through Database.Live).
+   * This design maintains separation between database connection management (owned by Database)
+   * and payment operations (owned by Payments), while allowing Payments to use the database
+   * for credit reservations.
    *
    * @param config - Stripe configuration
-   * @returns A Layer providing Payments with no dependencies
+   * @returns A Layer providing Payments (requires DrizzleORM)
    *
    * @example
    * ```ts
-   * const PaymentsLive = Payments.Live({
-   *   apiKey: process.env.STRIPE_SECRET_KEY!,
-   *   routerPriceId: process.env.STRIPE_ROUTER_PRICE_ID!,
+   * // Typically used through Database.Live which provides both:
+   * const DatabaseLive = Database.Live({
+   *   database: { connectionString: process.env.DATABASE_URL },
+   *   payments: {
+   *     apiKey: process.env.STRIPE_SECRET_KEY!,
+   *     routerPriceId: process.env.STRIPE_ROUTER_PRICE_ID!,
+   *   },
    * });
    *
-   * program.pipe(Effect.provide(PaymentsLive));
+   * program.pipe(Effect.provide(DbLive));
    * ```
    */
   static Live = (config: StripeConfig) => {

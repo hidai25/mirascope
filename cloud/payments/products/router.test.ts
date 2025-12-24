@@ -28,6 +28,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 subscriptions: {
@@ -62,6 +63,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 subscriptions: {
@@ -127,6 +129,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 billing: {
@@ -210,6 +213,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 prices: {
@@ -258,6 +262,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 prices: {
@@ -948,6 +953,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 subscriptions: {
@@ -1010,6 +1016,7 @@ describe("Router Product", () => {
         }).pipe(
           Effect.provide(
             Payments.Default.pipe(
+              Layer.provide(MockDrizzleORMLayer),
               Layer.provide(
                 Layer.succeed(Stripe, {
                   subscriptions: {
@@ -1128,6 +1135,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 prices: {
@@ -1183,6 +1191,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 prices: {
@@ -1240,6 +1249,7 @@ describe("Router Product", () => {
         }).pipe(
           Effect.provide(
             Payments.Default.pipe(
+              Layer.provide(MockDrizzleORMLayer),
               Layer.provide(
                 Layer.succeed(Stripe, {
                   prices: {
@@ -1291,6 +1301,7 @@ describe("Router Product", () => {
         }).pipe(
           Effect.provide(
             Payments.Default.pipe(
+              Layer.provide(MockDrizzleORMLayer),
               Layer.provide(
                 Layer.succeed(Stripe, {
                   config: {
@@ -1329,6 +1340,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 prices: {
@@ -1394,6 +1406,7 @@ describe("Router Product", () => {
       }).pipe(
         Effect.provide(
           Payments.Default.pipe(
+            Layer.provide(MockDrizzleORMLayer),
             Layer.provide(
               Layer.succeed(Stripe, {
                 config: {
@@ -1456,6 +1469,7 @@ describe("Router Product", () => {
         }).pipe(
           Effect.provide(
             Payments.Default.pipe(
+              Layer.provide(MockDrizzleORMLayer),
               Layer.provide(
                 Layer.succeed(Stripe, {
                   prices: {

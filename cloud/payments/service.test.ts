@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Effect, Layer } from "effect";
 import { Payments } from "@/payments/service";
 import { MockStripe } from "@/tests/payments";
+import { MockDrizzleORMLayer } from "@/tests/mock-drizzle";
 
 describe("Payments", () => {
   describe("Default layer", () => {
@@ -21,7 +22,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -54,7 +60,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -81,7 +92,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -104,7 +120,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -130,7 +151,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -167,7 +193,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -189,7 +220,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 
@@ -212,7 +248,12 @@ describe("Payments", () => {
 
           return true;
         }).pipe(
-          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+          Effect.provide(
+            Payments.Default.pipe(
+              Layer.provide(MockStripe),
+              Layer.provide(MockDrizzleORMLayer),
+            ),
+          ),
         ),
       );
 

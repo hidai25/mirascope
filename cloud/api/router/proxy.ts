@@ -9,7 +9,10 @@
 import { Effect } from "effect";
 import { ProxyError } from "@/errors";
 import type { ProxyConfig, ProviderName } from "@/api/router/providers";
-import { parseStreamingResponse } from "./streaming";
+import {
+  parseStreamingResponse,
+  type StreamMeteringContext,
+} from "./streaming";
 import type { TokenUsage } from "@/api/router/pricing";
 
 /**
@@ -72,6 +75,7 @@ export interface ProxyResult {
  * @param request - The incoming HTTP request
  * @param config - Provider configuration including API key
  * @param providerName - Name of the provider (for path extraction and errors)
+ * @param meteringContext - Context for automatic fund settlement in streaming responses
  * @returns Effect that resolves to ProxyResult with response and parsed body
  *
  * @example
@@ -79,13 +83,14 @@ export interface ProxyResult {
  * const result = yield* proxyToProvider(request, {
  *   ...PROVIDER_CONFIGS.openai,
  *   apiKey: process.env.OPENAI_API_KEY!,
- * }, "openai");
+ * }, "openai", meteringContext);
  * ```
  */
 export function proxyToProvider(
   request: Request,
   config: ProxyConfig & { apiKey: string },
   providerName: ProviderName,
+  meteringContext: StreamMeteringContext,
 ): Effect.Effect<ProxyResult, ProxyError> {
   return Effect.gen(function* () {
     // Validate API key is configured
@@ -146,6 +151,7 @@ export function proxyToProvider(
         response,
         format,
         providerName,
+        meteringContext,
       );
       return {
         response: streamResult.response,

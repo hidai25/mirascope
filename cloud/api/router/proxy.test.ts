@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { proxyToProvider, extractProviderPath } from "@/api/router/proxy";
 import { PROVIDER_CONFIGS } from "@/api/router/providers";
 import { ProxyError } from "@/errors";
+import { MockMeteringContext } from "@/tests/api";
 
 describe("Proxy", () => {
   describe("extractProviderPath", () => {
@@ -62,6 +63,7 @@ describe("Proxy", () => {
             apiKey: "", // Empty API key should fail
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ).pipe(Effect.flip),
       );
 
@@ -109,6 +111,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -154,6 +157,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -197,6 +201,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -253,6 +258,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -290,6 +296,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -320,6 +327,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ).pipe(Effect.flip),
       );
 
@@ -358,6 +366,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 
@@ -405,6 +414,7 @@ describe("Proxy", () => {
             apiKey: "test-key",
           },
           "openai",
+          MockMeteringContext.fromProvider("openai", "gpt-4"),
         ),
       );
 

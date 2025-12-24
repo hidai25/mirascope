@@ -25,6 +25,8 @@ import type { AuthResult } from "@/auth/context";
 import type { PublicUser, PublicOrganization, ApiKeyInfo } from "@/db/schema";
 import { TEST_DATABASE_URL } from "@/tests/db";
 import { DefaultMockPayments } from "@/tests/payments";
+import type { StreamMeteringContext } from "@/api/router/streaming";
+import type { ProviderName } from "@/api/router/providers";
 
 // Re-export expect from vitest
 export { expect };
@@ -436,4 +438,42 @@ export const TestClient = {
       return client;
     }),
   ),
+};
+
+// ============================================================================
+// Mock Metering Context for Router Tests
+// ============================================================================
+
+/**
+ * Factory for creating mock StreamMeteringContext objects in router tests.
+ *
+ * Provides a consistent way to create metering contexts without manually spreading
+ * or overriding properties.
+ *
+ * @example
+ * ```ts
+ * const context = MockMeteringContext.fromProvider("openai", "gpt-4");
+ * const customContext = MockMeteringContext.fromProvider("anthropic", "claude-3-opus", {
+ *   reservationId: "custom_res_123",
+ * });
+ * ```
+ */
+export const MockMeteringContext = {
+  fromProvider(
+    provider: ProviderName,
+    model: string,
+    overrides?: Partial<StreamMeteringContext>,
+  ): StreamMeteringContext {
+    return {
+      stripeCustomerId: "cus_test123",
+      stripeSecretKey: "sk_test_123",
+      routerPriceId: "price_test123",
+      routerMeterId: "meter_test123",
+      provider,
+      model,
+      reservationId: "res_test123",
+      databaseUrl: TEST_DATABASE_URL,
+      ...overrides,
+    };
+  },
 };

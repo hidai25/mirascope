@@ -4,6 +4,7 @@ import { authenticate } from "@/auth";
 import { Database } from "@/db";
 import { handleErrors, handleDefects } from "@/api/utils";
 import { proxyToProvider } from "@/api/router/proxy";
+import type { StreamMeteringContext } from "@/api/router/streaming";
 import {
   PROVIDER_CONFIGS,
   isValidProvider,
@@ -11,7 +12,9 @@ import {
   getCostCalculator,
   extractModelId,
 } from "@/api/router/providers";
-import { InternalError } from "@/errors";
+import { InternalError, UnauthorizedError } from "@/errors";
+import { Payments } from "@/payments";
+import { estimateCost, getFallbackEstimate } from "@/api/router/cost-estimator";
 
 /**
  * Unified Provider Proxy Route
@@ -60,7 +63,23 @@ export const Route = createFileRoute("/router/v0/$provider/$")({
           }
 
           // Authenticate user via Mirascope API key
-          yield* authenticate(request);
+          const { user, apiKeyInfo } = yield* authenticate(request);
+
+          if (!apiKeyInfo) {
+            return yield* new UnauthorizedError({
+              message: "API key required for router access",
+            });
+          }
+
+          // Get database service
+          const db = yield* Database;
+          const payments = yield* Payments; // For balance check and metering
+
+          // Get the organization for this API key
+          const organization = yield* db.organizations.findById({
+            organizationId: apiKeyInfo.organizationId,
+            userId: user.id,
+          });
 
           // Get provider-specific API key from environment
           const providerApiKey = getProviderApiKey(provider);
@@ -71,24 +90,71 @@ export const Route = createFileRoute("/router/v0/$provider/$")({
             });
           }
 
-          // Extract model ID using provider-specific logic
-          const requestBody = yield* Effect.tryPromise({
+          // Parse request body for all providers (needed for cost estimation)
+          const requestBodyText = yield* Effect.tryPromise({
             try: () => request.clone().text(),
             catch: () => null as string | null,
           });
 
-          let parsedBody: unknown = null;
-          if (requestBody) {
+          let parsedRequestBody: unknown = null;
+          if (requestBodyText) {
             try {
-              parsedBody = JSON.parse(requestBody);
+              parsedRequestBody = JSON.parse(requestBodyText);
             } catch {
-              // Not JSON, that's ok
+              // Not JSON, that's ok for Google (uses URL for model)
             }
           }
 
-          const modelId = extractModelId(provider, request, parsedBody);
+          // Extract model ID based on provider (Google uses URL, others use body)
+          const modelId = extractModelId(provider, request, parsedRequestBody);
 
-          // Proxy to provider with internal API key
+          // Fail early if we can't extract model ID
+          if (!modelId) {
+            return yield* new InternalError({
+              message: `Failed to extract model ID from ${provider} request`,
+            });
+          }
+
+          // Fail early if we can't parse request body (needed for cost estimation)
+          if (!parsedRequestBody) {
+            return yield* new InternalError({
+              message: "Failed to parse request body for cost estimation",
+            });
+          }
+
+          // Reserve funds before making the request (prevents concurrent overdraft)
+          const estimate = yield* estimateCost({
+            provider,
+            model: modelId,
+            requestBody: parsedRequestBody,
+          }).pipe(
+            Effect.catchAll(() => Effect.succeed(null)),
+            Effect.map(
+              (estimate) => estimate ?? getFallbackEstimate(parsedRequestBody),
+            ),
+          );
+
+          const reservationId = yield* payments.products.router.reserveFunds({
+            customerId: organization.stripeCustomerId,
+            organizationId: organization.id,
+            estimatedCost: estimate.cost,
+            model: modelId,
+            provider,
+          });
+
+          // Prepare metering context for streaming responses
+          const meteringContext: StreamMeteringContext = {
+            stripeCustomerId: organization.stripeCustomerId,
+            stripeSecretKey: process.env.STRIPE_SECRET_KEY || "",
+            routerPriceId: process.env.STRIPE_ROUTER_PRICE_ID || "",
+            routerMeterId: process.env.STRIPE_ROUTER_METER_ID || "",
+            provider,
+            model: modelId,
+            reservationId,
+            databaseUrl,
+          };
+
+          // Make the request with error handling for fund release
           const proxyResult = yield* proxyToProvider(
             request,
             {
@@ -96,43 +162,73 @@ export const Route = createFileRoute("/router/v0/$provider/$")({
               apiKey: providerApiKey,
             },
             provider,
+            meteringContext,
+          ).pipe(
+            Effect.catchAll((error) => {
+              // Release funds on proxy error
+              return Effect.gen(function* () {
+                yield* payments.products.router
+                  .releaseFunds(reservationId)
+                  .pipe(
+                    Effect.catchAll((releaseError) => {
+                      console.error(
+                        `Failed to release reservation ${reservationId} after proxy error:`,
+                        releaseError,
+                      );
+                      return Effect.succeed(undefined);
+                    }),
+                  );
+                return yield* Effect.fail(error);
+              });
+            }),
           );
 
-          // Calculate usage and cost
-          if (proxyResult.body && modelId) {
-            const calculator = getCostCalculator(provider);
-            if (calculator) {
-              // Extract usage from response
-              const usage = calculator.extractUsage(proxyResult.body);
+          // For streaming responses, settlement is handled automatically in streaming.ts
+          // via the meteringContext which includes the reservationId and databaseUrl
+          if (proxyResult.bodyPromise) {
+            return proxyResult.response;
+          }
 
-              // Calculate cost if usage was extracted
-              const result = usage
-                ? yield* calculator
-                    .calculate(modelId, usage)
-                    .pipe(Effect.catchAll(() => Effect.succeed(null)))
-                : null;
+          // For non-streaming responses, settle reservation with actual cost
+          // Calculate actual cost without charging (settleFunds will charge)
+          // provider is guaranteed to be valid due to validation on line 58
+          const costCalculator = getCostCalculator(provider);
 
-              if (usage && result) {
-                console.log({
-                  provider,
-                  model: modelId,
-                  usage: {
-                    inputTokens: usage.inputTokens,
-                    outputTokens: usage.outputTokens,
-                    cacheReadTokens: usage.cacheReadTokens || 0,
-                    cacheWriteTokens: usage.cacheWriteTokens || 0,
-                    totalTokens: usage.inputTokens + usage.outputTokens,
-                  },
-                  cost: {
-                    input: result.formattedCost.input,
-                    output: result.formattedCost.output,
-                    cacheRead: result.formattedCost.cacheRead,
-                    cacheWrite: result.formattedCost.cacheWrite,
-                    total: result.formattedCost.total,
-                  },
-                });
-              }
-            }
+          // Extract usage from response body
+          const usage = proxyResult.body
+            ? costCalculator.extractUsage(proxyResult.body)
+            : null;
+
+          const costResult = usage
+            ? yield* costCalculator
+                .calculate(modelId, usage)
+                .pipe(Effect.catchAll(() => Effect.succeed(null)))
+            : null;
+
+          if (costResult && costResult.cost.totalCost > 0) {
+            // Settle reservation - this updates DB and charges the meter
+            yield* payments.products.router
+              .settleFunds(reservationId, costResult.cost.totalCost)
+              .pipe(
+                Effect.catchAll((error) => {
+                  console.error(
+                    `Failed to settle reservation ${reservationId} (cost: $${costResult.cost.totalCost.toFixed(6)}):`,
+                    error,
+                  );
+                  return Effect.succeed(undefined);
+                }),
+              );
+          } else {
+            // No usage or cost calculation failed, release funds
+            yield* payments.products.router.releaseFunds(reservationId).pipe(
+              Effect.catchAll((error) => {
+                console.error(
+                  `Failed to release reservation ${reservationId} (no usage):`,
+                  error,
+                );
+                return Effect.succeed(undefined);
+              }),
+            );
           }
 
           return proxyResult.response;
