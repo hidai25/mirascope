@@ -5,6 +5,7 @@ import { Payments } from "@/payments";
 import type {
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
+  CreatePaymentIntentRequest,
 } from "@/api/organizations.schemas";
 
 export * from "@/api/organizations.schemas";
@@ -74,4 +75,32 @@ export const getOrganizationRouterBalanceHandler = (organizationId: string) =>
     );
 
     return { balance };
+  });
+
+export const createPaymentIntentHandler = (
+  organizationId: string,
+  payload: CreatePaymentIntentRequest,
+) =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const user = yield* AuthenticatedUser;
+    const payments = yield* Payments;
+
+    // First verify user has access to this organization
+    const organization = yield* db.organizations.findById({
+      organizationId,
+      userId: user.id,
+    });
+
+    // Create PaymentIntent for credit purchase
+    const result =
+      yield* payments.paymentIntents.createRouterCreditsPurchaseIntent({
+        customerId: organization.stripeCustomerId,
+        amountInDollars: payload.amount,
+        metadata: {
+          organizationId: organization.id,
+        },
+      });
+
+    return result;
   });
