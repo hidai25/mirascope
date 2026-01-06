@@ -27,6 +27,7 @@
 
 import * as os from "node:os";
 import * as crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { Effect, Layer, Schedule, Duration } from "effect";
 import { DrizzleORM } from "@/db/client";
 import {
@@ -295,7 +296,7 @@ const main = async () => {
   );
 };
 
-// Run if executed directly
-if (require.main === module) {
+// Run if executed directly (ESM check)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch(console.error);
 }

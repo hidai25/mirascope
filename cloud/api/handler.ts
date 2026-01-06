@@ -6,7 +6,7 @@ import { SettingsService, getSettings } from "@/settings";
 import { Database } from "@/db";
 import { Payments } from "@/payments";
 import { AuthenticatedUser, Authentication } from "@/auth";
-import { ClickHouseClient } from "@/clickhouse/client";
+import { ClickHouseClientNodeLive } from "@/clickhouse/client";
 import { ClickHouseSearchService } from "@/clickhouse/search";
 import type { PublicUser, ApiKeyInfo } from "@/db/schema";
 
@@ -28,7 +28,7 @@ type WebHandlerOptions = {
 function createWebHandler(options: WebHandlerOptions) {
   // ClickHouse services layer
   const settingsLayer = Layer.succeed(SettingsService, getSettings());
-  const clickHouseClientLayer = ClickHouseClient.Default.pipe(
+  const clickHouseClientLayer = ClickHouseClientNodeLive.pipe(
     Layer.provide(settingsLayer),
   );
   const clickHouseSearchLayer = ClickHouseSearchService.Default.pipe(
