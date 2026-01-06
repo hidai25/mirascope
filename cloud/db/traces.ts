@@ -81,6 +81,7 @@ import {
   type CreateTraceResponse,
 } from "@/db/schema/traces";
 import { spans, type NewSpan } from "@/db/schema/spans";
+import { spansOutbox } from "@/db/schema/spansOutbox";
 import type { ProjectRole } from "@/db/schema";
 import type { ResourceSpans, KeyValue } from "@/api/traces.schemas";
 
@@ -418,6 +419,29 @@ export class Traces extends BaseAuthenticatedEffectService<
                       }),
                   ),
                 );
+
+              // Write to outbox for ClickHouse sync (all inserted spans)
+              if (insertedSpans.length > 0) {
+                const outboxRows = insertedSpans.map((s) => ({
+                  spanId: s.id,
+                  operation: "INSERT" as const,
+                }));
+                yield* client
+                  .insert(spansOutbox)
+                  .values(outboxRows)
+                  .onConflictDoNothing({
+                    target: [spansOutbox.spanId, spansOutbox.operation],
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      (e) =>
+                        new DatabaseError({
+                          message: "Failed to write to outbox",
+                          cause: e,
+                        }),
+                    ),
+                  );
+              }
 
               return insertedSpans.length > 0;
             }).pipe(Effect.catchAll(() => Effect.succeed(false)));
