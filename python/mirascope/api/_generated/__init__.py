@@ -5,13 +5,14 @@
 from .types import (
     AlreadyExistsError,
     AlreadyExistsErrorTag,
+    ClickHouseError,
     DatabaseError,
     DatabaseErrorTag,
     HttpApiDecodeError,
     HttpApiDecodeErrorTag,
     InternalServerErrorBody,
+    InternalServerErrorBody_ClickHouseError,
     InternalServerErrorBody_DatabaseError,
-    InternalServerErrorBody_StripeError,
     Issue,
     IssueTag,
     NotFoundErrorBody,
@@ -34,7 +35,7 @@ from .errors import (
     NotFoundError,
     UnauthorizedError,
 )
-from . import annotations, api_keys, docs, environments, functions, health, organizations, projects, traces
+from . import annotations, api_keys, docs, environments, functions, health, organizations, projects, search, traces
 from .annotations import (
     AnnotationsCreateRequestLabel,
     AnnotationsCreateResponse,
@@ -83,6 +84,19 @@ from .organizations import (
     OrganizationsUpdateResponseRole,
 )
 from .projects import ProjectsCreateResponse, ProjectsGetResponse, ProjectsListResponseItem, ProjectsUpdateResponse
+from .search import (
+    SearchGetAnalyticsSummaryResponse,
+    SearchGetAnalyticsSummaryResponseTopFunctionsItem,
+    SearchGetAnalyticsSummaryResponseTopModelsItem,
+    SearchGetTraceDetailResponse,
+    SearchGetTraceDetailResponseSpansItem,
+    SearchSearchRequestAttributeFiltersItem,
+    SearchSearchRequestAttributeFiltersItemOperator,
+    SearchSearchRequestSortBy,
+    SearchSearchRequestSortOrder,
+    SearchSearchResponse,
+    SearchSearchResponseSpansItem,
+)
 from .traces import (
     TracesCreateRequestResourceSpansItem,
     TracesCreateRequestResourceSpansItemResource,
@@ -129,6 +143,7 @@ __all__ = [
     "ApiKeysListResponseItem",
     "AsyncMirascope",
     "BadRequestError",
+    "ClickHouseError",
     "ConflictError",
     "DatabaseError",
     "DatabaseErrorTag",
@@ -153,8 +168,8 @@ __all__ = [
     "HttpApiDecodeErrorTag",
     "InternalServerError",
     "InternalServerErrorBody",
+    "InternalServerErrorBody_ClickHouseError",
     "InternalServerErrorBody_DatabaseError",
-    "InternalServerErrorBody_StripeError",
     "Issue",
     "IssueTag",
     "Mirascope",
@@ -181,6 +196,17 @@ __all__ = [
     "PropertyKey",
     "PropertyKeyKey",
     "PropertyKeyKeyTag",
+    "SearchGetAnalyticsSummaryResponse",
+    "SearchGetAnalyticsSummaryResponseTopFunctionsItem",
+    "SearchGetAnalyticsSummaryResponseTopModelsItem",
+    "SearchGetTraceDetailResponse",
+    "SearchGetTraceDetailResponseSpansItem",
+    "SearchSearchRequestAttributeFiltersItem",
+    "SearchSearchRequestAttributeFiltersItemOperator",
+    "SearchSearchRequestSortBy",
+    "SearchSearchRequestSortOrder",
+    "SearchSearchResponse",
+    "SearchSearchResponseSpansItem",
     "StripeError",
     "TracesCreateRequestResourceSpansItem",
     "TracesCreateRequestResourceSpansItemResource",
@@ -216,5 +242,6 @@ __all__ = [
     "health",
     "organizations",
     "projects",
+    "search",
     "traces",
 ]
