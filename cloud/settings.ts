@@ -70,7 +70,7 @@ export function getSettings(): Settings {
     !settings.CLICKHOUSE_TLS_ENABLED
   ) {
     console.warn(
-      "CLICKHOUSE_TLS_HOSTNAME_VERIFY is ignored when TLS is disabled"
+      "CLICKHOUSE_TLS_HOSTNAME_VERIFY is ignored when TLS is disabled",
     );
   }
 
@@ -81,12 +81,12 @@ export function getSettings(): Settings {
     }
     if (settings.CLICKHOUSE_TLS_SKIP_VERIFY) {
       throw new Error(
-        "CLICKHOUSE_TLS_SKIP_VERIFY=true is not allowed in production"
+        "CLICKHOUSE_TLS_SKIP_VERIFY=true is not allowed in production",
       );
     }
     if (!settings.CLICKHOUSE_TLS_HOSTNAME_VERIFY) {
       throw new Error(
-        "CLICKHOUSE_TLS_HOSTNAME_VERIFY=true is required in production"
+        "CLICKHOUSE_TLS_HOSTNAME_VERIFY=true is required in production",
       );
     }
   }
@@ -98,7 +98,7 @@ export function getSettings(): Settings {
  * Cloudflare Workers environment type for settings extraction.
  * Extends as needed for additional bindings.
  */
-export type CloudflareEnv = {
+export type CloudflareEnvironment = {
   ENVIRONMENT?: string;
   DATABASE_URL?: string;
   CLICKHOUSE_URL?: string;
@@ -116,7 +116,9 @@ export type CloudflareEnv = {
  * Get settings from Cloudflare Workers environment bindings.
  * Used by Queue Consumer, Cron Trigger, etc.
  */
-export function getSettingsFromEnv(env: CloudflareEnv): Settings {
+export function getSettingsFromEnvironment(
+  env: CloudflareEnvironment,
+): Settings {
   const settings: Settings = {
     env: env.ENVIRONMENT || "local",
     DATABASE_URL: env.DATABASE_URL,
@@ -129,7 +131,8 @@ export function getSettingsFromEnv(env: CloudflareEnv): Settings {
     CLICKHOUSE_TLS_ENABLED: env.CLICKHOUSE_TLS_ENABLED === "true",
     CLICKHOUSE_TLS_CA: env.CLICKHOUSE_TLS_CA,
     CLICKHOUSE_TLS_SKIP_VERIFY: env.CLICKHOUSE_TLS_SKIP_VERIFY === "true",
-    CLICKHOUSE_TLS_HOSTNAME_VERIFY: env.CLICKHOUSE_TLS_HOSTNAME_VERIFY !== "false",
+    CLICKHOUSE_TLS_HOSTNAME_VERIFY:
+      env.CLICKHOUSE_TLS_HOSTNAME_VERIFY !== "false",
   };
 
   return settings;

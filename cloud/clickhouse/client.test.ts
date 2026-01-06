@@ -1,41 +1,20 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "@/tests/clickhouse";
 import { Effect, Layer } from "effect";
 import {
   ClickHouseClient,
-  ClickHouseClientNodeLive,
+  ClickHouseWorkersClient,
   ClickHouseClientWorkersLive,
 } from "@/clickhouse/client";
 import { SettingsService, type Settings } from "@/settings";
 import { ClickHouseError } from "@/errors";
-
-// Mock @clickhouse/client module
-vi.mock("@clickhouse/client", () => ({
-  createClient: vi.fn(() => ({
-    query: vi.fn(),
-    insert: vi.fn(),
-    command: vi.fn(),
-  })),
-}));
-
-// Mock fs module
-vi.mock("node:fs", () => ({
-  default: {
-    readFileSync: vi.fn(),
-  },
-}));
-
-// Helper to create a proper fetch mock
-const createFetchMock = (response: Response) => {
-  const mockFn = vi.fn().mockResolvedValue(response) as unknown as typeof fetch;
-  return mockFn;
-};
+import { it as vitestIt, vi } from "vitest";
 
 const createTestSettings = (overrides: Partial<Settings> = {}): Settings => ({
   env: "local",
-  CLICKHOUSE_URL: "http://localhost:8123",
-  CLICKHOUSE_USER: "default",
-  CLICKHOUSE_PASSWORD: "clickhouse",
-  CLICKHOUSE_DATABASE: "mirascope_analytics",
+  CLICKHOUSE_URL: process.env.CLICKHOUSE_URL ?? "http://localhost:8123",
+  CLICKHOUSE_USER: process.env.CLICKHOUSE_USER ?? "default",
+  CLICKHOUSE_PASSWORD: process.env.CLICKHOUSE_PASSWORD ?? "clickhouse",
+  CLICKHOUSE_DATABASE: process.env.CLICKHOUSE_DATABASE ?? "mirascope_analytics",
   CLICKHOUSE_TLS_ENABLED: false,
   CLICKHOUSE_TLS_HOSTNAME_VERIFY: true,
   ...overrides,
@@ -46,372 +25,312 @@ const makeTestSettingsLayer = (settings: Settings) =>
 
 describe("ClickHouseClient", () => {
   describe("ClickHouseClientNodeLive", () => {
-    beforeEach(() => {
-      vi.clearAllMocks();
-    });
+    it.effect("creates a Layer successfully", () =>
+      Effect.gen(function* () {
+        const client = yield* ClickHouseClient;
+        expect(client).toBeDefined();
+        expect(client.sql).toBeDefined();
+        expect(client.unsafeQuery).toBeDefined();
+        expect(client.insert).toBeDefined();
+        expect(client.command).toBeDefined();
+      }),
+    );
 
-    it("creates a Layer successfully", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockClient = {
-        query: vi.fn().mockResolvedValue({
-          json: vi.fn().mockResolvedValue([{ id: "1" }, { id: "2" }]),
-        }),
-        insert: vi.fn().mockResolvedValue(undefined),
-        command: vi.fn().mockResolvedValue(undefined),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
+    it.effect("executes unsafeQuery successfully", () =>
+      Effect.gen(function* () {
+        const client = yield* ClickHouseClient;
 
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
+        const result = yield* client.unsafeQuery<{ n: number }>(
+          "SELECT 1 as n",
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.n).toBe(1);
+      }),
+    );
+
+    it.effect("executes query with sql template and parameters", () =>
+      Effect.gen(function* () {
+        const { sql } = yield* ClickHouseClient;
+        const value = 42;
+
+        // Use Effect SQL template for parameterized queries
+        const result = yield* sql<{ n: number }>`SELECT ${value} as n`;
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.n).toBe(42);
+      }),
+    );
+
+    it.effect("handles unsafeQuery errors with ClickHouseError", () =>
+      Effect.gen(function* () {
+        const client = yield* ClickHouseClient;
+
+        const error = yield* client
+          .unsafeQuery("SELECT * FROM non_existent_table_xyz_123")
+          .pipe(Effect.flip);
+
+        expect(error).toBeInstanceOf(ClickHouseError);
+        expect(error.message).toContain("ClickHouse operation failed");
+      }),
+    );
+
+    it.effect("executes command successfully", () =>
+      Effect.gen(function* () {
+        const client = yield* ClickHouseClient;
+
+        // Use a simple command that doesn't require a real table
+        yield* client.command("SELECT 1");
+      }),
+    );
+
+    it.effect("skips insert for empty rows", () =>
+      Effect.gen(function* () {
+        const client = yield* ClickHouseClient;
+
+        // Should not error even though table doesn't exist (no-op for empty array)
+        yield* client.insert("any_table", []);
+      }),
+    );
+  });
+
+  describe("ClickHouseClientWorkersLive", () => {
+    const createWorkersTestLayer = (settings: Settings) =>
+      ClickHouseClientWorkersLive.pipe(
+        Layer.provide(makeTestSettingsLayer(settings)),
       );
 
+    vitestIt("executes unsafeQuery via HTTP API", async () => {
+      const settings = createTestSettings();
       const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return client;
+        const client = yield* ClickHouseWorkersClient;
+        return yield* client.unsafeQuery<{ n: number }>("SELECT 1 as n");
       });
 
       const result = await Effect.runPromise(
-        program.pipe(Effect.provide(testLayer))
+        program.pipe(Effect.provide(createWorkersTestLayer(settings))),
       );
 
-      expect(result).toBeDefined();
-      expect(result.query).toBeDefined();
-      expect(result.insert).toBeDefined();
-      expect(result.command).toBeDefined();
+      expect(result).toHaveLength(1);
+      expect(result[0]?.n).toBe(1);
     });
 
-    it("executes query successfully", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockRows = [{ id: "1", name: "test1" }, { id: "2", name: "test2" }];
-      const mockClient = {
-        query: vi.fn().mockResolvedValue({
-          json: vi.fn().mockResolvedValue(mockRows),
-        }),
-        insert: vi.fn(),
-        command: vi.fn(),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
-
+    vitestIt("handles empty response", async () => {
       const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
       const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.query<{ id: string; name: string }>(
-          "SELECT * FROM test"
+        const client = yield* ClickHouseWorkersClient;
+        return yield* client.unsafeQuery<{ n: number }>(
+          "SELECT 1 as n WHERE 1 = 0",
         );
       });
 
       const result = await Effect.runPromise(
-        program.pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toEqual(mockRows);
-      expect(mockClient.query).toHaveBeenCalledWith({
-        query: "SELECT * FROM test",
-        query_params: undefined,
-        format: "JSONEachRow",
-      });
-    });
-
-    it("handles query errors", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockClient = {
-        query: vi.fn().mockRejectedValue(new Error("Query failed")),
-        insert: vi.fn(),
-        command: vi.fn(),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.query("SELECT * FROM test");
-      });
-
-      const result = await Effect.runPromise(
-        program.pipe(
-          Effect.provide(testLayer),
-          Effect.either
-        )
-      );
-
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left).toBeInstanceOf(ClickHouseError);
-        expect(result.left.message).toContain("Query failed");
-      }
-    });
-
-    it("inserts rows successfully", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockClient = {
-        query: vi.fn(),
-        insert: vi.fn().mockResolvedValue(undefined),
-        command: vi.fn(),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const rows = [
-        { id: "1", name: "test1" },
-        { id: "2", name: "test2" },
-      ];
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.insert("test_table", rows);
-      });
-
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      expect(mockClient.insert).toHaveBeenCalledWith({
-        table: "test_table",
-        values: rows,
-        format: "JSONEachRow",
-      });
-    });
-
-    it("skips insert for empty rows", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockClient = {
-        query: vi.fn(),
-        insert: vi.fn().mockResolvedValue(undefined),
-        command: vi.fn(),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.insert("test_table", []);
-      });
-
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      expect(mockClient.insert).not.toHaveBeenCalled();
-    });
-
-    it("executes command successfully", async () => {
-      const { createClient } = await import("@clickhouse/client");
-      const mockClient = {
-        query: vi.fn(),
-        insert: vi.fn(),
-        command: vi.fn().mockResolvedValue(undefined),
-      };
-      vi.mocked(createClient).mockReturnValue(mockClient as never);
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientNodeLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.command("CREATE TABLE test (id String)");
-      });
-
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      expect(mockClient.command).toHaveBeenCalledWith({
-        query: "CREATE TABLE test (id String)",
-      });
-    });
-  });
-
-  describe("ClickHouseClientWorkersLive", () => {
-    const originalFetch = globalThis.fetch;
-
-    beforeEach(() => {
-      vi.clearAllMocks();
-    });
-
-    afterEach(() => {
-      globalThis.fetch = originalFetch;
-    });
-
-    it("executes query via HTTP API", async () => {
-      const mockResponse = '{"id":"1"}\n{"id":"2"}';
-      globalThis.fetch = createFetchMock(
-        new Response(mockResponse, { status: 200 })
-      );
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.query<{ id: string }>("SELECT * FROM test");
-      });
-
-      const result = await Effect.runPromise(
-        program.pipe(Effect.provide(testLayer))
-      );
-
-      expect(result).toEqual([{ id: "1" }, { id: "2" }]);
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("default_format=JSONEachRow"),
-        expect.objectContaining({ method: "POST" })
-      );
-    });
-
-    it("handles empty response", async () => {
-      globalThis.fetch = createFetchMock(
-        new Response("", { status: 200 })
-      );
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.query<{ id: string }>("SELECT * FROM test");
-      });
-
-      const result = await Effect.runPromise(
-        program.pipe(Effect.provide(testLayer))
+        program.pipe(Effect.provide(createWorkersTestLayer(settings))),
       );
 
       expect(result).toEqual([]);
     });
 
-    it("handles HTTP errors from ClickHouse", async () => {
-      globalThis.fetch = createFetchMock(
-        new Response("Code: 60. DB::Exception", { status: 500 })
-      );
-
+    vitestIt("handles HTTP errors from ClickHouse", async () => {
       const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
       const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.query("SELECT * FROM test");
+        const client = yield* ClickHouseWorkersClient;
+        return yield* client
+          .unsafeQuery("SELECT * FROM non_existent_table_xyz_123")
+          .pipe(Effect.flip);
       });
 
-      const result = await Effect.runPromise(
-        program.pipe(
-          Effect.provide(testLayer),
-          Effect.either
-        )
+      const error = await Effect.runPromise(
+        program.pipe(Effect.provide(createWorkersTestLayer(settings))),
       );
 
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect(result.left).toBeInstanceOf(ClickHouseError);
-        expect(result.left.message).toContain("500");
-      }
+      expect(error).toBeInstanceOf(ClickHouseError);
+      expect(error.message).toContain("ClickHouse operation failed");
     });
 
-    it("validates https in production", async () => {
+    vitestIt("validates https in production", async () => {
       const settings = createTestSettings({
         env: "production",
-        CLICKHOUSE_URL: "http://clickhouse.example.com", // HTTP instead of HTTPS
+        CLICKHOUSE_URL: "http://clickhouse.example.com",
       });
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
+
+      const program = Effect.gen(function* () {
+        yield* ClickHouseWorkersClient;
+      });
+
+      await expect(
+        Effect.runPromise(
+          program.pipe(Effect.provide(createWorkersTestLayer(settings))),
+        ),
+      ).rejects.toThrow("must use https://");
+    });
+
+    vitestIt("skips insert for empty rows (Workers)", async () => {
+      const settings = createTestSettings();
+      const program = Effect.gen(function* () {
+        const client = yield* ClickHouseWorkersClient;
+        yield* client.insert("any_table", []);
+      });
+
+      await Effect.runPromise(
+        program.pipe(Effect.provide(createWorkersTestLayer(settings))),
       );
+    });
+
+    vitestIt("executes command via HTTP API", async () => {
+      const settings = createTestSettings();
+      const program = Effect.gen(function* () {
+        const client = yield* ClickHouseWorkersClient;
+        yield* client.command("SELECT 1");
+      });
+
+      await Effect.runPromise(
+        program.pipe(Effect.provide(createWorkersTestLayer(settings))),
+      );
+    });
+  });
+
+  describe("TLS configuration validation", () => {
+    vitestIt("throws error when TLS_SKIP_VERIFY is true", async () => {
+      const settings = createTestSettings({
+        CLICKHOUSE_TLS_ENABLED: true,
+        CLICKHOUSE_TLS_SKIP_VERIFY: true,
+      });
 
       const program = Effect.gen(function* () {
         yield* ClickHouseClient;
       });
 
       await expect(
-        Effect.runPromise(program.pipe(Effect.provide(testLayer)))
-      ).rejects.toThrow("must use https://");
+        Effect.runPromise(
+          program.pipe(
+            Effect.provide(ClickHouseClient.Default),
+            Effect.provide(makeTestSettingsLayer(settings)),
+          ),
+        ),
+      ).rejects.toThrow("CLICKHOUSE_TLS_SKIP_VERIFY=true is not supported");
     });
 
-    it("inserts rows via HTTP API", async () => {
-      globalThis.fetch = createFetchMock(
-        new Response("", { status: 200 })
+    vitestIt("throws error when TLS_HOSTNAME_VERIFY is false", async () => {
+      const settings = createTestSettings({
+        CLICKHOUSE_TLS_ENABLED: true,
+        CLICKHOUSE_TLS_HOSTNAME_VERIFY: false,
+      });
+
+      const program = Effect.gen(function* () {
+        yield* ClickHouseClient;
+      });
+
+      await expect(
+        Effect.runPromise(
+          program.pipe(
+            Effect.provide(ClickHouseClient.Default),
+            Effect.provide(makeTestSettingsLayer(settings)),
+          ),
+        ),
+      ).rejects.toThrow(
+        "CLICKHOUSE_TLS_HOSTNAME_VERIFY=false is not supported",
+      );
+    });
+
+    vitestIt("logs warning when TLS_MIN_VERSION is non-default", async () => {
+      const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const settings = createTestSettings({
+        CLICKHOUSE_TLS_ENABLED: true,
+        CLICKHOUSE_TLS_CA: "/nonexistent/ca.pem",
+        CLICKHOUSE_TLS_MIN_VERSION: "TLSv1.3",
+      });
+
+      const program = Effect.gen(function* () {
+        yield* ClickHouseClient;
+      });
+
+      // Will fail because CA file doesn't exist, but warning should be logged first
+      await expect(
+        Effect.runPromise(
+          program.pipe(
+            Effect.provide(ClickHouseClient.Default),
+            Effect.provide(makeTestSettingsLayer(settings)),
+          ),
+        ),
+      ).rejects.toThrow();
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("CLICKHOUSE_TLS_MIN_VERSION=TLSv1.3"),
       );
 
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
+      consoleSpy.mockRestore();
+    });
 
-      const rows = [{ id: "1" }, { id: "2" }];
+    vitestIt("does not throw when TLS settings are valid", async () => {
+      const settings = createTestSettings({
+        CLICKHOUSE_TLS_ENABLED: true,
+        CLICKHOUSE_TLS_SKIP_VERIFY: false,
+        CLICKHOUSE_TLS_HOSTNAME_VERIFY: true,
+        CLICKHOUSE_TLS_MIN_VERSION: "TLSv1.2",
+        // Without CA, it won't throw for validation but will fail on connection
+      });
 
       const program = Effect.gen(function* () {
         const client = yield* ClickHouseClient;
-        return yield* client.insert("test_table", rows);
+        return client;
       });
 
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      // URL is encoded, so check for the encoded form
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("test_table"),
-        expect.objectContaining({
-          method: "POST",
-          body: '{"id":"1"}\n{"id":"2"}',
-        })
+      // Should create client without validation errors (may fail on actual connection)
+      const client = await Effect.runPromise(
+        program.pipe(
+          Effect.provide(ClickHouseClient.Default),
+          Effect.provide(makeTestSettingsLayer(settings)),
+        ),
       );
+
+      expect(client).toBeDefined();
+    });
+  });
+
+  describe("ClickHouseClient.layer", () => {
+    vitestIt("creates a layer with provided configuration", () => {
+      const layer = ClickHouseClient.layer({
+        url: "http://localhost:8123",
+        user: "default",
+        password: "test",
+        database: "test_db",
+      });
+
+      expect(layer).toBeDefined();
+      expect(Layer.isLayer(layer)).toBe(true);
     });
 
-    it("skips insert for empty rows (Workers)", async () => {
-      globalThis.fetch = createFetchMock(new Response("", { status: 200 }));
+    vitestIt("creates a layer with default configuration", () => {
+      const layer = ClickHouseClient.layer();
 
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
-      const program = Effect.gen(function* () {
-        const client = yield* ClickHouseClient;
-        return yield* client.insert("test_table", []);
-      });
-
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(layer).toBeDefined();
+      expect(Layer.isLayer(layer)).toBe(true);
     });
 
-    it("executes command via HTTP API", async () => {
-      globalThis.fetch = createFetchMock(
-        new Response("", { status: 200 })
-      );
-
-      const settings = createTestSettings();
-      const testLayer = ClickHouseClientWorkersLive.pipe(
-        Layer.provide(makeTestSettingsLayer(settings))
-      );
-
+    vitestIt("layer works with unsafeQuery", async () => {
       const program = Effect.gen(function* () {
         const client = yield* ClickHouseClient;
-        return yield* client.command("CREATE TABLE test (id String)");
+        return yield* client.unsafeQuery<{ n: number }>("SELECT 1 as n");
       });
 
-      await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
-
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining("localhost:8123"),
-        expect.objectContaining({
-          method: "POST",
-          body: "CREATE TABLE test (id String)",
-        })
+      const result = await Effect.runPromise(
+        program.pipe(
+          Effect.provide(
+            ClickHouseClient.layer({
+              url: process.env.CLICKHOUSE_URL ?? "http://localhost:8123",
+              user: process.env.CLICKHOUSE_USER ?? "default",
+              password: process.env.CLICKHOUSE_PASSWORD ?? "clickhouse",
+              database:
+                process.env.CLICKHOUSE_DATABASE ?? "mirascope_analytics",
+            }),
+          ),
+        ),
       );
+
+      expect(result).toHaveLength(1);
+      expect(result[0]?.n).toBe(1);
     });
   });
 });

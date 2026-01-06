@@ -7,9 +7,9 @@
  * ## Architecture
  *
  * ```
- * ClickHouseClient (Effect Service Tag)
- *   ├── ClickHouseClientNodeLive (@clickhouse/client for Node.js)
- *   └── ClickHouseClientWorkersLive (fetch + HTTP API for Workers)
+ * ClickhouseClient.layer (HTTP connection)
+ *   └── ClickHouseClient (Effect Service)
+ *         └── SqlClient (Effect SQL)
  * ```
  *
  * ## Usage
@@ -27,8 +27,8 @@
  * import { ClickHouseClient, ClickHouseClientNodeLive } from "@/clickhouse/client";
  *
  * const program = Effect.gen(function* () {
- *   const client = yield* ClickHouseClient;
- *   const spans = yield* client.query<SpanRow>("SELECT * FROM spans_analytics LIMIT 10");
+ *   const { sql } = yield* ClickHouseClient;
+ *   const spans = yield* sql<SpanRow>`SELECT * FROM spans_analytics LIMIT 10`;
  *   return spans;
  * });
  *
@@ -38,11 +38,10 @@
  * ```
  */
 
-import {
-  createClient,
-  type ClickHouseClient as CHClient,
-} from "@clickhouse/client";
 import { Context, Effect, Layer } from "effect";
+import { ClickhouseClient as EffectClickhouseClient } from "@effect/sql-clickhouse";
+import { SqlClient } from "@effect/sql";
+import { NodeContext } from "@effect/platform-node";
 import * as fs from "node:fs";
 import { ClickHouseError } from "@/errors";
 import { SettingsService, type Settings } from "@/settings";
@@ -67,13 +66,30 @@ export interface ClickHouseConfig {
 
 /**
  * ClickHouseClient service interface type.
+ *
+ * Provides both low-level Effect SQL access and convenience methods.
+ * The convenience methods (unsafeQuery, insert, command) match
+ * ClickHouseWorkersClientService for easy environment switching.
+ * Node.js additionally exposes sql and clickhouse for Effect SQL templates.
  */
 export interface ClickHouseClientService {
-  /** Execute a SELECT query and return typed results. */
-  readonly query: <T>(
+  /** The Effect SQL client for executing queries with sql`` template. */
+  readonly sql: SqlClient.SqlClient;
+  /** The ClickHouse-specific client for insert operations. */
+  readonly clickhouse: EffectClickhouseClient.ClickhouseClient;
+  /**
+   * Execute a raw SQL query without parameterization.
+   * WARNING: This method is unsafe and should only be used for trusted SQL.
+   * For parameterized queries, use the `sql` template instead:
+   * @example
+   * ```ts
+   * const { sql } = yield* ClickHouseClient;
+   * const rows = yield* sql`SELECT * FROM table WHERE id = ${id}`;
+   * ```
+   */
+  readonly unsafeQuery: <T extends object>(
     sql: string,
-    params?: Record<string, unknown>,
-  ) => Effect.Effect<T[], ClickHouseError>;
+  ) => Effect.Effect<readonly T[], ClickHouseError>;
   /** Insert rows into a table in JSONEachRow format. */
   readonly insert: <T extends Record<string, unknown>>(
     table: string,
@@ -86,18 +102,26 @@ export interface ClickHouseClientService {
 /**
  * ClickHouseClient service.
  *
- * Provides query, insert, and command operations for ClickHouse.
- * Implementations differ between Node.js and Workers environments.
+ * Provides Effect SQL client for ClickHouse operations.
+ * Uses the same pattern as PostgreSQL with @effect/sql-pg.
  *
  * @example
  * ```ts
- * // Using with direct config
  * const program = Effect.gen(function* () {
- *   const client = yield* ClickHouseClient;
- *   return yield* client.query<Row>("SELECT * FROM table");
- * }).pipe(
- *   Effect.provide(ClickHouseClient.layer({ url: "http://localhost:8123" }))
- * );
+ *   const { sql, clickhouse } = yield* ClickHouseClient;
+ *
+ *   // Query using Effect SQL template
+ *   const rows = yield* sql`SELECT * FROM spans_analytics LIMIT 10`;
+ *
+ *   // Insert using ClickHouse insertQuery
+ *   yield* clickhouse.insertQuery({
+ *     table: "spans_analytics",
+ *     values: rows,
+ *     format: "JSONEachRow",
+ *   });
+ *
+ *   return rows;
+ * });
  * ```
  */
 export class ClickHouseClient extends Context.Tag("ClickHouseClient")<
@@ -107,61 +131,62 @@ export class ClickHouseClient extends Context.Tag("ClickHouseClient")<
   /**
    * Default layer using SettingsService for configuration.
    * Requires SettingsService to be provided.
+   *
+   * Uses @effect/sql-clickhouse over ClickHouse HTTP for Node.js.
    */
   static Default = Layer.effect(
     ClickHouseClient,
     Effect.gen(function* () {
-      const settings = yield* SettingsService;
-      const client = createNodeClickHouseClient(settings);
+      const sql = yield* SqlClient.SqlClient;
+      const clickhouse = yield* EffectClickhouseClient.ClickhouseClient;
+
+      const toClickHouseError = (e: unknown): ClickHouseError =>
+        e instanceof ClickHouseError
+          ? e
+          : new ClickHouseError({
+              message: `ClickHouse operation failed: ${e instanceof Error ? e.message : String(e)}`,
+              cause: e instanceof Error ? e : undefined,
+            });
 
       return {
-        query: <T>(sql: string, params?: Record<string, unknown>) =>
-          Effect.tryPromise({
-            try: async (): Promise<T[]> => {
-              const result = await client.query({
-                query: sql,
-                query_params: params,
-                format: "JSONEachRow",
-              });
-              return result.json();
-            },
-            catch: (e) =>
-              new ClickHouseError({
-                message: `Query failed: ${e instanceof Error ? e.message : String(e)}`,
-                cause: e,
-              }),
-          }),
-
-        insert: <T extends Record<string, unknown>>(table: string, rows: T[]) =>
-          Effect.tryPromise({
-            try: async () => {
-              if (rows.length === 0) return;
-              await client.insert({
-                table,
-                values: rows,
-                format: "JSONEachRow",
-              });
-            },
-            catch: (e) =>
-              new ClickHouseError({
-                message: `Insert failed: ${e instanceof Error ? e.message : String(e)}`,
-                cause: e,
-              }),
-          }),
-
-        command: (sql: string) =>
-          Effect.tryPromise({
-            try: async () => {
-              await client.command({ query: sql });
-            },
-            catch: (e) =>
-              new ClickHouseError({
-                message: `Command failed: ${e instanceof Error ? e.message : String(e)}`,
-                cause: e,
-              }),
-          }),
+        sql,
+        clickhouse,
+        unsafeQuery: <T extends object>(
+          query: string,
+        ): Effect.Effect<readonly T[], ClickHouseError> =>
+          sql
+            .unsafe<T>(query)
+            .pipe(Effect.catchAll((e) => Effect.fail(toClickHouseError(e)))),
+        insert: <T extends Record<string, unknown>>(
+          table: string,
+          rows: T[],
+        ): Effect.Effect<void, ClickHouseError> => {
+          if (rows.length === 0) return Effect.void;
+          return clickhouse
+            .insertQuery({
+              table,
+              values: rows,
+              format: "JSONEachRow",
+            })
+            .pipe(Effect.catchAll((e) => Effect.fail(toClickHouseError(e))));
+        },
+        command: (query: string): Effect.Effect<void, ClickHouseError> =>
+          sql.unsafe(query).pipe(
+            Effect.asVoid,
+            Effect.catchAll((e) => Effect.fail(toClickHouseError(e))),
+          ),
       };
     }),
+  ).pipe(
+    Layer.provide(
+      Layer.unwrapEffect(
+        Effect.gen(function* () {
+          const settings = yield* SettingsService;
+          return createEffectClickhouseClientLayer(settings);
+        }),
+      ),
+    ),
+    Layer.provide(NodeContext.layer),
   );
 
   /**
@@ -186,10 +211,68 @@ export class ClickHouseClient extends Context.Tag("ClickHouseClient")<
 }
 
 // =============================================================================
-// Node.js Implementation (@clickhouse/client)
+// Node.js Implementation (@effect/sql-clickhouse over HTTP)
 // =============================================================================
 
-const createNodeClickHouseClient = (settings: Settings): CHClient => {
+/**
+ * Validates TLS settings for compatibility with @effect/sql-clickhouse.
+ *
+ * ## TLS Limitations
+ *
+ * The @effect/sql-clickhouse package uses @clickhouse/client internally,
+ * which only supports:
+ * - `ca_cert` - Custom CA certificate (BasicTLSOptions)
+ * - `cert` + `key` - Client certificate for mutual TLS (MutualTLSOptions)
+ *
+ * The following settings are NOT supported:
+ * - `CLICKHOUSE_TLS_SKIP_VERIFY` - Cannot skip certificate verification
+ * - `CLICKHOUSE_TLS_HOSTNAME_VERIFY` - Cannot disable hostname verification
+ * - `CLICKHOUSE_TLS_MIN_VERSION` - Cannot set minimum TLS version
+ *
+ * @param settings - Application settings including ClickHouse configuration
+ * @throws Error if unsupported TLS settings are configured
+ */
+const validateTLSSettings = (settings: Settings): void => {
+  if (settings.CLICKHOUSE_TLS_ENABLED) {
+    if (settings.CLICKHOUSE_TLS_SKIP_VERIFY) {
+      throw new Error(
+        "CLICKHOUSE_TLS_SKIP_VERIFY=true is not supported by @effect/sql-clickhouse. " +
+          "The library always verifies certificates when TLS is enabled. " +
+          "Use a valid CA certificate via CLICKHOUSE_TLS_CA instead.",
+      );
+    }
+
+    if (settings.CLICKHOUSE_TLS_HOSTNAME_VERIFY === false) {
+      throw new Error(
+        "CLICKHOUSE_TLS_HOSTNAME_VERIFY=false is not supported by @effect/sql-clickhouse. " +
+          "The library always performs hostname verification. " +
+          "Ensure your certificate CN/SAN matches the ClickHouse hostname.",
+      );
+    }
+
+    if (
+      settings.CLICKHOUSE_TLS_MIN_VERSION &&
+      settings.CLICKHOUSE_TLS_MIN_VERSION !== "TLSv1.2"
+    ) {
+      // Log warning but don't fail - TLSv1.2+ is typically enforced by Node.js
+      console.warn(
+        `CLICKHOUSE_TLS_MIN_VERSION=${settings.CLICKHOUSE_TLS_MIN_VERSION} is not directly ` +
+          "configurable in @effect/sql-clickhouse. Node.js defaults apply (typically TLSv1.2+).",
+      );
+    }
+  }
+};
+
+/**
+ * Creates a @effect/sql-clickhouse layer from Settings.
+ *
+ * @param settings - Application settings including ClickHouse configuration
+ * @returns Layer providing ClickhouseClient and SqlClient
+ */
+const createEffectClickhouseClientLayer = (settings: Settings) => {
+  // Validate TLS settings before creating layer
+  validateTLSSettings(settings);
+
   // TLS CA certificate loading with explicit error handling
   let caCert: Buffer | undefined;
   if (settings.CLICKHOUSE_TLS_ENABLED && settings.CLICKHOUSE_TLS_CA) {
@@ -206,7 +289,7 @@ const createNodeClickHouseClient = (settings: Settings): CHClient => {
   const tlsOptions =
     settings.CLICKHOUSE_TLS_ENABLED && caCert ? { ca_cert: caCert } : undefined;
 
-  return createClient({
+  return EffectClickhouseClient.layer({
     url: settings.CLICKHOUSE_URL,
     username: settings.CLICKHOUSE_USER,
     password: settings.CLICKHOUSE_PASSWORD,
@@ -221,8 +304,8 @@ const createNodeClickHouseClient = (settings: Settings): CHClient => {
  * ClickHouseClient implementation for Node.js environment.
  * Alias for ClickHouseClient.Default.
  *
- * Uses `@clickhouse/client` for native TCP/HTTP connections with
- * full TLS configuration support.
+ * Uses `@effect/sql-clickhouse` over the ClickHouse HTTP interface
+ * with full Effect integration.
  */
 export const ClickHouseClientNodeLive = ClickHouseClient.Default;
 
@@ -233,7 +316,7 @@ export const ClickHouseClientNodeLive = ClickHouseClient.Default;
 /**
  * Internal Workers HTTP client for ClickHouse.
  *
- * Uses fetch API with ClickHouse HTTP interface.
+ * Uses fetch API with the ClickHouse HTTP interface.
  * TLS is handled by Cloudflare's system CA (no custom CA support).
  */
 const createWorkersClickHouseClient = (settings: Settings) => {
@@ -342,6 +425,36 @@ const createWorkersClickHouseClient = (settings: Settings) => {
 };
 
 /**
+ * Workers-specific ClickHouse client service interface.
+ *
+ * Uses fetch API instead of @effect/sql-clickhouse for Workers compatibility.
+ * Interface matches ClickHouseClientService for easy environment switching.
+ */
+export interface ClickHouseWorkersClientService {
+  /**
+   * Execute a raw SQL query without parameterization.
+   * WARNING: This method is unsafe and should only be used for trusted SQL.
+   */
+  readonly unsafeQuery: <T extends object>(
+    sql: string,
+  ) => Effect.Effect<readonly T[], ClickHouseError>;
+  /** Insert rows into a table in JSONEachRow format. */
+  readonly insert: <T extends Record<string, unknown>>(
+    table: string,
+    rows: T[],
+  ) => Effect.Effect<void, ClickHouseError>;
+  /** Execute a DDL/DML command (CREATE, ALTER, etc.). */
+  readonly command: (sql: string) => Effect.Effect<void, ClickHouseError>;
+}
+
+/**
+ * ClickHouseWorkersClient service tag for Workers environment.
+ */
+export class ClickHouseWorkersClient extends Context.Tag(
+  "ClickHouseWorkersClient",
+)<ClickHouseWorkersClient, ClickHouseWorkersClientService>() {}
+
+/**
  * ClickHouseClient implementation for Cloudflare Workers environment.
  *
  * Uses fetch API with ClickHouse HTTP interface.
@@ -352,18 +465,20 @@ const createWorkersClickHouseClient = (settings: Settings) => {
  * - ClickHouse must have a public CA signed certificate in production
  */
 export const ClickHouseClientWorkersLive = Layer.effect(
-  ClickHouseClient,
+  ClickHouseWorkersClient,
   Effect.gen(function* () {
     const settings = yield* SettingsService;
     const client = createWorkersClickHouseClient(settings);
 
     return {
-      query: <T>(sql: string, params?: Record<string, unknown>) =>
+      unsafeQuery: <T extends object>(
+        sql: string,
+      ): Effect.Effect<readonly T[], ClickHouseError> =>
         Effect.tryPromise({
-          try: () => client.query<T>(sql, params),
+          try: async () => client.query<T>(sql) as Promise<readonly T[]>,
           catch: (e) =>
             new ClickHouseError({
-              message: `Query failed: ${e instanceof Error ? e.message : String(e)}`,
+              message: `ClickHouse operation failed: ${e instanceof Error ? e.message : String(e)}`,
               cause: e,
             }),
         }),
@@ -373,7 +488,7 @@ export const ClickHouseClientWorkersLive = Layer.effect(
           try: () => client.insert(table, rows),
           catch: (e) =>
             new ClickHouseError({
-              message: `Insert failed: ${e instanceof Error ? e.message : String(e)}`,
+              message: `ClickHouse operation failed: ${e instanceof Error ? e.message : String(e)}`,
               cause: e,
             }),
         }),
@@ -383,11 +498,42 @@ export const ClickHouseClientWorkersLive = Layer.effect(
           try: () => client.command(sql),
           catch: (e) =>
             new ClickHouseError({
-              message: `Command failed: ${e instanceof Error ? e.message : String(e)}`,
+              message: `ClickHouse operation failed: ${e instanceof Error ? e.message : String(e)}`,
               cause: e,
             }),
         }),
     };
+  }),
+);
+
+// =============================================================================
+// Node.js to Workers Adapter
+// =============================================================================
+
+/**
+ * Adapter layer that provides ClickHouseWorkersClient from ClickHouseClient.
+ * Use this in Node.js environment when you need ClickHouseWorkersClient interface.
+ *
+ * @example
+ * ```ts
+ * const layer = Layer.mergeAll(
+ *   ClickHouseClientNodeLive,
+ *   ClickHouseWorkersClientFromNode,
+ * );
+ * ```
+ */
+export const ClickHouseWorkersClientFromNode = Layer.effect(
+  ClickHouseWorkersClient,
+  Effect.gen(function* () {
+    const client = yield* ClickHouseClient;
+    const service: ClickHouseWorkersClientService = {
+      unsafeQuery: <T extends object>(sql: string) =>
+        client.unsafeQuery<T>(sql),
+      insert: <T extends Record<string, unknown>>(table: string, rows: T[]) =>
+        client.insert<T>(table, rows),
+      command: (sql: string) => client.command(sql),
+    };
+    return service;
   }),
 );
 
@@ -397,6 +543,6 @@ export const ClickHouseClientWorkersLive = Layer.effect(
 
 /**
  * Default ClickHouseClient layer for local development and testing.
- * Uses Node.js implementation with `@clickhouse/client`.
+ * Uses Node.js implementation with `@effect/sql-clickhouse`.
  */
 export const ClickHouseClientLive = ClickHouseClientNodeLive;
