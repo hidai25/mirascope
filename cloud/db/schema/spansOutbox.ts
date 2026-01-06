@@ -66,11 +66,11 @@ export const spansOutbox = pgTable(
     processableIdx: index("spans_outbox_processable_idx").on(
       table.status,
       table.processAfter,
-      table.retryCount
+      table.retryCount,
     ),
     // Lookup by spanId
     spanIdIdx: index("spans_outbox_span_id_idx").on(table.spanId),
-  })
+  }),
 );
 
 // Internal types
