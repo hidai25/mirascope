@@ -12,6 +12,7 @@ export * from "@/db/schema/functions";
 export * from "@/db/schema/annotations";
 export * from "@/db/schema/traces";
 export * from "@/db/schema/spans";
+export * from "@/db/schema/spansOutbox";
 
 export type { PublicSession } from "@/db/schema/sessions";
 export type { PublicUser } from "@/db/schema/users";
@@ -40,6 +41,7 @@ export type { PublicFunction } from "@/db/schema/functions";
 export type { PublicAnnotation } from "@/db/schema/annotations";
 export type { PublicTrace } from "@/db/schema/traces";
 export type { PublicSpan } from "@/db/schema/spans";
+export type { PublicSpansOutbox } from "@/db/schema/spansOutbox";
 
 import { users } from "@/db/schema/users";
 import { sessions } from "@/db/schema/sessions";
@@ -55,6 +57,7 @@ import { functions } from "@/db/schema/functions";
 import { annotations } from "@/db/schema/annotations";
 import { traces } from "@/db/schema/traces";
 import { spans } from "@/db/schema/spans";
+import { spansOutbox } from "@/db/schema/spansOutbox";
 
 export type DatabaseTable =
   | typeof users
@@ -70,4 +73,5 @@ export type DatabaseTable =
   | typeof functions
   | typeof annotations
   | typeof traces
-  | typeof spans;
+  | typeof spans
+  | typeof spansOutbox;
