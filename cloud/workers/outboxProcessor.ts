@@ -9,7 +9,7 @@
 import { Effect } from "effect";
 import { and, eq, lte } from "drizzle-orm";
 import { DrizzleORM } from "@/db/client";
-import { ClickHouseClient } from "@/clickhouse/client";
+import { ClickHouseWorkersClient } from "@/clickhouse/client";
 import { spansOutbox, spans, traces } from "@/db/schema";
 import type { Span } from "@/db/schema/spans";
 import type { Trace } from "@/db/schema/traces";
@@ -212,15 +212,17 @@ export const transformSpanForClickHouse = (
  * @param messages - Array of outbox messages to process
  * @param onAck - Callback when message is successfully processed or should not be retried
  * @param onRetry - Callback when message should be retried
+ * @param workerId - Unique identifier for the worker processing the messages
  */
 export const processOutboxMessages = (
   messages: OutboxMessage[],
   onAck: (messageKey: string) => void,
   onRetry: (messageKey: string) => void,
+  workerId: string,
 ) =>
   Effect.gen(function* () {
     const client = yield* DrizzleORM;
-    const clickhouse = yield* ClickHouseClient;
+    const clickhouse = yield* ClickHouseWorkersClient;
 
     const clickhouseRows: SpanAnalyticsRow[] = [];
     const processedMessages: OutboxMessage[] = [];
@@ -257,7 +259,7 @@ export const processOutboxMessages = (
       const now = new Date();
       const [outboxRow] = yield* client
         .update(spansOutbox)
-        .set({ status: "processing", lockedAt: now })
+        .set({ status: "processing", lockedAt: now, lockedBy: workerId })
         .where(
           and(
             eq(spansOutbox.spanId, outboxMessage.spanId),
