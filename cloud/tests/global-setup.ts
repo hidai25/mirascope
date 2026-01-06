@@ -24,6 +24,10 @@ export const CONNECTION_FILE = path.join(
   os.tmpdir(),
   "mirascope-test-db-url.txt",
 );
+export const CLICKHOUSE_CONNECTION_FILE = path.join(
+  os.tmpdir(),
+  "mirascope-test-clickhouse-connection.json",
+);
 
 // Custom error type for container failures
 class ContainerError extends Data.TaggedError("ContainerError")<{
@@ -106,6 +110,22 @@ export async function setup() {
 
   runClickhouseMigrations(clickhouseUrl, clickhouseNativePort);
 
+  fs.writeFileSync(
+    CLICKHOUSE_CONNECTION_FILE,
+    JSON.stringify(
+      {
+        url: clickhouseUrl,
+        user: clickhouseUser,
+        password: clickhousePassword,
+        database: clickhouseDatabase,
+        nativePort: clickhouseNativePort,
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+
   container = await Effect.runPromise(
     Effect.acquireRelease(acquireContainer, (c) =>
       Effect.promise(() => c.stop()),
@@ -129,6 +149,11 @@ export async function teardown() {
   // Clean up the temp file
   try {
     fs.unlinkSync(CONNECTION_FILE);
+  } catch {
+    // Ignore if file doesn't exist
+  }
+  try {
+    fs.unlinkSync(CLICKHOUSE_CONNECTION_FILE);
   } catch {
     // Ignore if file doesn't exist
   }

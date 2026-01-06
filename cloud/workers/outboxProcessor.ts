@@ -69,7 +69,7 @@ export type SpanAnalyticsRow = {
 // =============================================================================
 
 const MAX_RETRIES = 5;
-const MAX_ERROR_MESSAGE_LENGTH = 1000;
+const MAX_ERROR_MESSAGE_LENGTH = 500;
 
 // =============================================================================
 // Utility Functions
@@ -86,10 +86,20 @@ const calculateBackoff = (retryCount: number): Date => {
 };
 
 /**
- * Sanitize error message to prevent excessive storage.
+ * Sanitize error message to prevent excessive storage and credential leakage.
+ *
+ * - Masks ClickHouse DSN credentials (clickhouse://user:pass@host)
+ * - Masks key-value patterns (password=, secret=)
+ * - Truncates to MAX_ERROR_MESSAGE_LENGTH characters
  */
-const sanitizeErrorMessage = (error: string): string => {
-  return error.slice(0, MAX_ERROR_MESSAGE_LENGTH);
+const sanitizeErrorMessage = (message: string): string => {
+  const sanitized = message
+    // ClickHouse DSN format (clickhouse://user:pass@host)
+    .replace(/clickhouse:\/\/[^@]+@/gi, "clickhouse://***@")
+    // Key-value patterns
+    .replace(/password[=:][^\s&]+/gi, "password=***")
+    .replace(/secret[=:][^\s&]+/gi, "secret=***");
+  return sanitized.slice(0, MAX_ERROR_MESSAGE_LENGTH);
 };
 
 /**
@@ -114,11 +124,14 @@ export const transformSpanForClickHouse = (
   const status = span.status as { code?: number; message?: string } | null;
 
   // Calculate duration in milliseconds
+  // Per plan: fallback to null if end_time < start_time (negative duration)
   let durationMs: number | null = null;
   if (span.startTimeUnixNano && span.endTimeUnixNano) {
     const startNs = BigInt(span.startTimeUnixNano);
     const endNs = BigInt(span.endTimeUnixNano);
-    durationMs = Number((endNs - startNs) / BigInt(1000000));
+    const calculatedMs = Number((endNs - startNs) / BigInt(1000000));
+    // Only set if non-negative (negative indicates data inconsistency)
+    durationMs = calculatedMs >= 0 ? calculatedMs : null;
   }
 
   // Convert Unix nano to ISO string
@@ -212,7 +225,7 @@ export const transformSpanForClickHouse = (
  * @param messages - Array of outbox messages to process
  * @param onAck - Callback when message is successfully processed or should not be retried
  * @param onRetry - Callback when message should be retried
- * @param workerId - Unique identifier for the worker processing the messages
+ * @param workerId - Worker identifier for lock ownership (for debugging/collision analysis)
  */
 export const processOutboxMessages = (
   messages: OutboxMessage[],

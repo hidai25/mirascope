@@ -286,6 +286,9 @@ const createEffectClickhouseClientLayer = (settings: Settings) => {
   }
 
   // Build TLS options only if explicitly enabled with CA cert
+  // Note: @clickhouse/client only supports ca_cert in BasicTLSOptions
+  // Other TLS settings (HOSTNAME_VERIFY, MIN_VERSION, SKIP_VERIFY) are
+  // validated at settings.ts level for production safety
   const tlsOptions =
     settings.CLICKHOUSE_TLS_ENABLED && caCert ? { ca_cert: caCert } : undefined;
 
@@ -295,7 +298,10 @@ const createEffectClickhouseClientLayer = (settings: Settings) => {
     password: settings.CLICKHOUSE_PASSWORD,
     database: settings.CLICKHOUSE_DATABASE,
     tls: tlsOptions,
+    // Backpressure control: limit concurrent connections
+    // @clickhouse/client manages connection pooling internally
     max_open_connections: 10,
+    // Request timeout for individual queries
     request_timeout: 30000,
   });
 };
