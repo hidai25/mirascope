@@ -210,9 +210,11 @@ describe("CostCalculator", () => {
       );
 
       expect(result).toBeDefined();
-      expect(result?.cost.inputCost).toBe(0.00015); // 1000 / 1M * 0.15
-      expect(result?.cost.outputCost).toBe(0.0003); // 500 / 1M * 0.6
-      expect(result?.cost.totalCost).toBe(0.00045);
+      // 1000 / 1M * 1500 centicents = 1.5 -> 1 centicent
+      expect(result?.cost.inputCost).toBe(1n);
+      // 500 / 1M * 6000 centicents = 3 centicents
+      expect(result?.cost.outputCost).toBe(3n);
+      expect(result?.cost.totalCost).toBe(4n);
     });
   });
 
@@ -321,8 +323,8 @@ describe("CostCalculator", () => {
       expect(result).toBeDefined();
       // 5m tokens remain 1:1, so cacheWriteTokens = 1000
       expect(result?.usage.cacheWriteTokens).toBe(1000);
-      // Cost: 1000 tokens / 1M * 1.25 (5m price) = 0.00125
-      expect(result?.cost.cacheWriteCost).toBeCloseTo(0.00125, 6);
+      // Cost in centi-cents: 1000 tokens / 1M * 12500cc (5m price) = 12.5cc -> 12cc
+      expect(result?.cost.cacheWriteCost).toBe(12n);
     });
 
     it("should extract, normalize, and price 1h cache correctly", async () => {
@@ -347,8 +349,8 @@ describe("CostCalculator", () => {
       expect(result).toBeDefined();
       // 1h tokens normalized: 1000 * 1.6 = 1600
       expect(result?.usage.cacheWriteTokens).toBe(1600);
-      // Cost: 1600 tokens / 1M * 1.25 (5m price) = 0.002
-      expect(result?.cost.cacheWriteCost).toBeCloseTo(0.002, 6);
+      // Cost in centi-cents: 1600 tokens / 1M * 12500cc (5m price) = 20cc
+      expect(result?.cost.cacheWriteCost).toBe(20n);
     });
 
     it("should extract, normalize, and price mixed 5m + 1h cache tokens correctly", async () => {
@@ -373,8 +375,8 @@ describe("CostCalculator", () => {
       expect(result).toBeDefined();
       // Normalized: 500 (5m) + 1000 * 1.6 (1h) = 500 + 1600 = 2100
       expect(result?.usage.cacheWriteTokens).toBe(2100);
-      // Cost: 2100 tokens / 1M * 1.25 (5m price) = 0.002625
-      expect(result?.cost.cacheWriteCost).toBeCloseTo(0.002625, 6);
+      // Cost in centi-cents: 2100 tokens / 1M * 12500cc (5m price) = 26.25cc -> 26cc
+      expect(result?.cost.cacheWriteCost).toBe(26n);
     });
   });
 
@@ -497,10 +499,7 @@ describe("CostCalculator", () => {
 
       expect(result).toBeDefined();
       expect(result?.usage.inputTokens).toBe(1000);
-      expect(result?.cost.totalCost).toBe(0);
-      expect(result?.formattedCost.input).toBe("N/A");
-      expect(result?.formattedCost.output).toBe("N/A");
-      expect(result?.formattedCost.total).toBe("N/A");
+      expect(result?.cost.totalCost).toBe(0n);
     });
 
     it("should handle fetch errors gracefully", async () => {
@@ -524,34 +523,7 @@ describe("CostCalculator", () => {
       );
 
       expect(result).toBeDefined();
-      expect(result?.cost.totalCost).toBe(0);
-      expect(result?.formattedCost.total).toBe("N/A");
-    });
-  });
-
-  describe("formatted cost output", () => {
-    it("should format costs correctly", async () => {
-      const calculator = new OpenAICostCalculator();
-      const responseBody = {
-        usage: {
-          prompt_tokens: 1000,
-          completion_tokens: 500,
-          total_tokens: 1500,
-          prompt_tokens_details: {
-            cached_tokens: 200,
-          },
-        },
-      };
-
-      const result = await Effect.runPromise(
-        calculator.calculate("gpt-4o-mini", responseBody),
-      );
-
-      expect(result).toBeDefined();
-      expect(result?.formattedCost.input).toMatch(/^\$\d+\.\d{6}$/);
-      expect(result?.formattedCost.output).toMatch(/^\$\d+\.\d{6}$/);
-      expect(result?.formattedCost.total).toMatch(/^\$\d+\.\d{6}$/);
-      expect(result?.formattedCost.cacheRead).toMatch(/^\$\d+\.\d{6}$/);
+      expect(result?.cost.totalCost).toBe(0n);
     });
   });
 });

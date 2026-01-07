@@ -3,16 +3,16 @@
  *
  * Provides a unified interface for extracting usage from provider responses
  * and calculating costs using models.dev pricing data.
+ *
+ * All costs are calculated and returned in centi-cents (BIGINT).
  */
 
 import { Effect } from "effect";
 import {
   getModelPricing,
   calculateCost,
-  formatCostBreakdown,
   type TokenUsage,
   type CostBreakdown,
-  type FormattedCostBreakdown,
 } from "@/api/router/pricing";
 import type { ProviderName } from "@/api/router/providers";
 
@@ -40,7 +40,7 @@ export abstract class BaseCostCalculator {
    *
    * @param modelId - The model ID from the request
    * @param responseBody - The parsed provider response body
-   * @returns Effect with usage and cost data, or null if usage unavailable
+   * @returns Effect with usage and cost data (in centi-cents), or null if usage unavailable
    */
   public calculate(
     modelId: string,
@@ -49,7 +49,6 @@ export abstract class BaseCostCalculator {
     {
       usage: TokenUsage;
       cost: CostBreakdown;
-      formattedCost: FormattedCostBreakdown;
     } | null,
     Error
   > {
@@ -71,25 +70,19 @@ export abstract class BaseCostCalculator {
           return {
             usage,
             cost: {
-              inputCost: 0,
-              outputCost: 0,
-              totalCost: 0,
-            },
-            formattedCost: {
-              input: "N/A",
-              output: "N/A",
-              total: "N/A",
+              inputCost: 0n,
+              outputCost: 0n,
+              totalCost: 0n,
             },
           };
         }
 
-        // Calculate cost
+        // Calculate cost in centi-cents
         const cost = calculateCost(pricing, usage);
 
         return {
           usage,
           cost,
-          formattedCost: formatCostBreakdown(cost),
         };
       }.bind(this),
     );
