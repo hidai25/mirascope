@@ -139,7 +139,7 @@ export function getModelPricing(
 }
 
 /**
- * Usage data for cost calculation
+ * Usage data for cost calculation.
  */
 export interface TokenUsage {
   inputTokens: number;
@@ -149,7 +149,7 @@ export interface TokenUsage {
 }
 
 /**
- * Calculated cost breakdown
+ * Calculated cost breakdown (in dollars).
  */
 export interface CostBreakdown {
   inputCost: number;
@@ -168,70 +168,4 @@ export interface FormattedCostBreakdown {
   cacheRead?: string;
   cacheWrite?: string;
   total: string;
-}
-
-/**
- * Calculates the cost for a request based on usage and pricing.
- *
- * @param pricing - The model's pricing information
- * @param usage - Token usage from the response
- * @returns Cost breakdown in USD
- */
-export function calculateCost(
-  pricing: ModelPricing,
-  usage: TokenUsage,
-): CostBreakdown {
-  // All costs in models.dev are per million tokens
-  const inputCost = (usage.inputTokens / 1_000_000) * pricing.input;
-  const outputCost = (usage.outputTokens / 1_000_000) * pricing.output;
-
-  const cacheReadCost =
-    usage.cacheReadTokens && pricing.cache_read
-      ? (usage.cacheReadTokens / 1_000_000) * pricing.cache_read
-      : undefined;
-
-  const cacheWriteCost =
-    usage.cacheWriteTokens && pricing.cache_write
-      ? (usage.cacheWriteTokens / 1_000_000) * pricing.cache_write
-      : undefined;
-
-  const totalCost =
-    inputCost + outputCost + (cacheReadCost || 0) + (cacheWriteCost || 0);
-
-  return {
-    inputCost,
-    outputCost,
-    cacheReadCost,
-    cacheWriteCost,
-    totalCost,
-  };
-}
-
-/**
- * Formats a single cost value in USD as a string.
- */
-function formatCostValue(cost: number): string {
-  return `$${cost.toFixed(6)}`;
-}
-
-/**
- * Formats a cost breakdown into string representations.
- *
- * @param breakdown - The cost breakdown to format
- * @returns Formatted cost breakdown with all values as strings
- */
-export function formatCostBreakdown(
-  breakdown: CostBreakdown,
-): FormattedCostBreakdown {
-  return {
-    input: formatCostValue(breakdown.inputCost),
-    output: formatCostValue(breakdown.outputCost),
-    cacheRead: breakdown.cacheReadCost
-      ? formatCostValue(breakdown.cacheReadCost)
-      : undefined,
-    cacheWrite: breakdown.cacheWriteCost
-      ? formatCostValue(breakdown.cacheWriteCost)
-      : undefined,
-    total: formatCostValue(breakdown.totalCost),
-  };
 }

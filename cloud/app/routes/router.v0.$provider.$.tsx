@@ -102,21 +102,26 @@ export const Route = createFileRoute("/router/v0/$provider/$")({
           if (proxyResult.body && modelId) {
             const calculator = getCostCalculator(provider);
             if (calculator) {
-              const result = yield* calculator
-                .calculate(modelId, proxyResult.body)
-                .pipe(Effect.catchAll(() => Effect.succeed(null)));
+              // Extract usage from response
+              const usage = calculator.extractUsage(proxyResult.body);
 
-              if (result) {
+              // Calculate cost if usage was extracted
+              const result = usage
+                ? yield* calculator
+                    .calculate(modelId, usage)
+                    .pipe(Effect.catchAll(() => Effect.succeed(null)))
+                : null;
+
+              if (usage && result) {
                 console.log({
                   provider,
                   model: modelId,
                   usage: {
-                    inputTokens: result.usage.inputTokens,
-                    outputTokens: result.usage.outputTokens,
-                    cacheReadTokens: result.usage.cacheReadTokens || 0,
-                    cacheWriteTokens: result.usage.cacheWriteTokens || 0,
-                    totalTokens:
-                      result.usage.inputTokens + result.usage.outputTokens,
+                    inputTokens: usage.inputTokens,
+                    outputTokens: usage.outputTokens,
+                    cacheReadTokens: usage.cacheReadTokens || 0,
+                    cacheWriteTokens: usage.cacheWriteTokens || 0,
+                    totalTokens: usage.inputTokens + usage.outputTokens,
                   },
                   cost: {
                     input: result.formattedCost.input,

@@ -4,8 +4,6 @@ import {
   fetchModelsDotDevPricingData,
   getModelsDotDevPricingData,
   getModelPricing,
-  calculateCost,
-  formatCostBreakdown,
   clearPricingCache,
 } from "@/api/router/pricing";
 
@@ -221,129 +219,6 @@ describe("Pricing", () => {
       );
 
       expect(result).toBeNull();
-    });
-  });
-
-  describe("calculateCost", () => {
-    it("should calculate cost correctly for basic usage", () => {
-      const pricing = {
-        input: 0.15, // per million tokens
-        output: 0.6,
-      };
-
-      const usage = {
-        inputTokens: 1000,
-        outputTokens: 500,
-      };
-
-      const result = calculateCost(pricing, usage);
-
-      expect(result.inputCost).toBe(0.00015); // 1000 / 1M * 0.15
-      expect(result.outputCost).toBe(0.0003); // 500 / 1M * 0.6
-      expect(result.totalCost).toBe(0.00045);
-      expect(result.cacheReadCost).toBeUndefined();
-      expect(result.cacheWriteCost).toBeUndefined();
-    });
-
-    it("should calculate cost with cache tokens", () => {
-      const pricing = {
-        input: 0.15,
-        output: 0.6,
-        cache_read: 0.075,
-        cache_write: 0.1875,
-      };
-
-      const usage = {
-        inputTokens: 1000,
-        outputTokens: 500,
-        cacheReadTokens: 200,
-        cacheWriteTokens: 100,
-      };
-
-      const result = calculateCost(pricing, usage);
-
-      expect(result.inputCost).toBeCloseTo(0.00015, 10);
-      expect(result.outputCost).toBeCloseTo(0.0003, 10);
-      expect(result.cacheReadCost).toBeCloseTo(0.000015, 10); // 200 / 1M * 0.075
-      expect(result.cacheWriteCost).toBeCloseTo(0.00001875, 10); // 100 / 1M * 0.1875
-      expect(result.totalCost).toBeCloseTo(
-        0.00015 + 0.0003 + 0.000015 + 0.00001875,
-        10,
-      );
-    });
-
-    it("should handle missing cache pricing", () => {
-      const pricing = {
-        input: 0.15,
-        output: 0.6,
-      };
-
-      const usage = {
-        inputTokens: 1000,
-        outputTokens: 500,
-        cacheReadTokens: 200,
-        cacheWriteTokens: 100,
-      };
-
-      const result = calculateCost(pricing, usage);
-
-      expect(result.cacheReadCost).toBeUndefined();
-      expect(result.cacheWriteCost).toBeUndefined();
-      expect(result.totalCost).toBe(0.00045);
-    });
-
-    it("should handle zero tokens", () => {
-      const pricing = {
-        input: 0.15,
-        output: 0.6,
-      };
-
-      const usage = {
-        inputTokens: 0,
-        outputTokens: 0,
-      };
-
-      const result = calculateCost(pricing, usage);
-
-      expect(result.inputCost).toBe(0);
-      expect(result.outputCost).toBe(0);
-      expect(result.totalCost).toBe(0);
-    });
-  });
-
-  describe("formatCostBreakdown", () => {
-    it("should format cost breakdown with 6 decimal places", () => {
-      const breakdown = {
-        inputCost: 0.00015,
-        outputCost: 0.0003,
-        cacheReadCost: 0.000075,
-        cacheWriteCost: 0.0001,
-        totalCost: 0.000525,
-      };
-
-      const formatted = formatCostBreakdown(breakdown);
-
-      expect(formatted.input).toBe("$0.000150");
-      expect(formatted.output).toBe("$0.000300");
-      expect(formatted.cacheRead).toBe("$0.000075");
-      expect(formatted.cacheWrite).toBe("$0.000100");
-      expect(formatted.total).toBe("$0.000525");
-    });
-
-    it("should handle undefined cache costs", () => {
-      const breakdown = {
-        inputCost: 0.00015,
-        outputCost: 0.0003,
-        totalCost: 0.00045,
-      };
-
-      const formatted = formatCostBreakdown(breakdown);
-
-      expect(formatted.input).toBe("$0.000150");
-      expect(formatted.output).toBe("$0.000300");
-      expect(formatted.cacheRead).toBeUndefined();
-      expect(formatted.cacheWrite).toBeUndefined();
-      expect(formatted.total).toBe("$0.000450");
     });
   });
 

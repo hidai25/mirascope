@@ -8,8 +8,6 @@
 import { Effect } from "effect";
 import {
   getModelPricing,
-  calculateCost,
-  formatCostBreakdown,
   type TokenUsage,
   type CostBreakdown,
   type FormattedCostBreakdown,
@@ -32,8 +30,11 @@ export abstract class BaseCostCalculator {
    * Extracts token usage from a provider response.
    *
    * Must be implemented by each provider-specific calculator.
+   *
+   * @param body - The parsed provider response body
+   * @returns Validated TokenUsage with non-negative numbers, or null if extraction fails
    */
-  protected abstract extractUsage(body: unknown): TokenUsage | null;
+  public abstract extractUsage(body: unknown): TokenUsage | null;
 
   /**
    * Extracts token usage from a streaming chunk.
@@ -42,70 +43,92 @@ export abstract class BaseCostCalculator {
    * streaming-specific formats (e.g., OpenAI Responses API, Anthropic deltas).
    *
    * @param chunk - A parsed chunk from the streaming response
-   * @returns Token usage if found, null otherwise
+   * @returns Validated TokenUsage with non-negative numbers, or null if extraction fails
    */
   public abstract extractUsageFromStreamChunk(
     chunk: unknown,
   ): TokenUsage | null;
 
   /**
-   * Main entry point: calculates usage and cost for a request.
+   * Calculates cost from TokenUsage using models.dev pricing data.
    *
-   * @param modelId - The model ID from the request
-   * @param responseBody - The parsed provider response body
-   * @returns Effect with usage and cost data, or null if usage unavailable
+   * @param modelId - The model ID
+   * @param usage - Token usage data from the provider response
+   * @returns Effect with cost data, or null if pricing unavailable
    */
   public calculate(
     modelId: string,
-    responseBody: unknown,
+    usage: TokenUsage,
   ): Effect.Effect<
     {
-      usage: TokenUsage;
       cost: CostBreakdown;
       formattedCost: FormattedCostBreakdown;
     } | null,
     Error
   > {
-    return Effect.gen(
-      function* (this: BaseCostCalculator) {
-        // Extract usage from response
-        const usage = this.extractUsage(responseBody);
-        if (!usage) {
-          return null;
-        }
+    return Effect.gen(this, function* () {
+      // Get pricing data (null if unavailable)
+      const pricing = yield* getModelPricing(this.provider, modelId).pipe(
+        Effect.catchAll(() => Effect.succeed(null)),
+      );
 
-        // Get pricing data (null if unavailable)
-        const pricing = yield* getModelPricing(this.provider, modelId).pipe(
-          Effect.catchAll(() => Effect.succeed(null)),
-        );
+      if (!pricing) {
+        return null;
+      }
 
-        if (!pricing) {
-          // Return usage without cost data
-          return {
-            usage,
-            cost: {
-              inputCost: 0,
-              outputCost: 0,
-              totalCost: 0,
-            },
-            formattedCost: {
-              input: "N/A",
-              output: "N/A",
-              total: "N/A",
-            },
-          };
-        }
+      // Calculate costs (all costs in models.dev are per million tokens)
+      const inputCost = (usage.inputTokens / 1_000_000) * pricing.input;
+      const outputCost = (usage.outputTokens / 1_000_000) * pricing.output;
 
-        // Calculate cost
-        const cost = calculateCost(pricing, usage);
+      const cacheReadCost =
+        usage.cacheReadTokens && pricing.cache_read
+          ? (usage.cacheReadTokens / 1_000_000) * pricing.cache_read
+          : undefined;
 
-        return {
-          usage,
-          cost,
-          formattedCost: formatCostBreakdown(cost),
-        };
-      }.bind(this),
-    );
+      const cacheWriteCost =
+        usage.cacheWriteTokens && pricing.cache_write
+          ? (usage.cacheWriteTokens / 1_000_000) * pricing.cache_write
+          : undefined;
+
+      const totalCost =
+        inputCost + outputCost + (cacheReadCost || 0) + (cacheWriteCost || 0);
+
+      // Validate that costs are valid numbers (not NaN or negative)
+      if (
+        isNaN(inputCost) ||
+        isNaN(outputCost) ||
+        isNaN(totalCost) ||
+        inputCost < 0 ||
+        outputCost < 0 ||
+        totalCost < 0
+      ) {
+        return null;
+      }
+
+      const cost: CostBreakdown = {
+        inputCost,
+        outputCost,
+        cacheReadCost,
+        cacheWriteCost,
+        totalCost,
+      };
+
+      // Format costs as strings with 6 decimal places
+      const formatCost = (value: number) => `$${value.toFixed(6)}`;
+
+      const formattedCost: FormattedCostBreakdown = {
+        input: formatCost(inputCost),
+        output: formatCost(outputCost),
+        cacheRead: cacheReadCost ? formatCost(cacheReadCost) : undefined,
+        cacheWrite: cacheWriteCost ? formatCost(cacheWriteCost) : undefined,
+        total: formatCost(totalCost),
+      };
+
+      return {
+        cost,
+        formattedCost,
+      };
+    });
   }
 }
 
@@ -121,7 +144,7 @@ export class OpenAICostCalculator extends BaseCostCalculator {
     super("openai");
   }
 
-  protected extractUsage(body: unknown): TokenUsage | null {
+  public extractUsage(body: unknown): TokenUsage | null {
     if (typeof body !== "object" || body === null) return null;
 
     const bodyObj = body as Record<string, unknown>;
@@ -211,7 +234,7 @@ export class AnthropicCostCalculator extends BaseCostCalculator {
   // Normalize: 5m tokens stay 1:1, 1h tokens scaled by 1.6
   static readonly EPHEMERAL_1H_CACHE_INPUT_TOKENS_MULTIPLIER = 1.6;
 
-  protected extractUsage(body: unknown): TokenUsage | null {
+  public extractUsage(body: unknown): TokenUsage | null {
     if (typeof body !== "object" || body === null) return null;
 
     const usage = (
@@ -258,15 +281,17 @@ export class AnthropicCostCalculator extends BaseCostCalculator {
     return {
       inputTokens: usage.input_tokens,
       outputTokens: usage.output_tokens,
-      cacheReadTokens,
-      cacheWriteTokens,
+      cacheReadTokens: cacheReadTokens > 0 ? cacheReadTokens : undefined,
+      cacheWriteTokens: cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
     };
   }
 
   /**
    * Extracts usage from streaming chunks.
    *
-   * Anthropic streams usage in the final message_stop or message_delta event.
+   * Anthropic provides cumulative token counts in message_delta events during streaming.
+   * Each message_delta contains the running total of tokens used up to that point.
+   * This ensures accurate usage tracking even if the stream is stopped early.
    */
   public extractUsageFromStreamChunk(chunk: unknown): TokenUsage | null {
     // Delegate to standard extraction - Anthropic format is the same for streaming
@@ -282,7 +307,7 @@ export class GoogleCostCalculator extends BaseCostCalculator {
     super("google");
   }
 
-  protected extractUsage(body: unknown): TokenUsage | null {
+  public extractUsage(body: unknown): TokenUsage | null {
     if (typeof body !== "object" || body === null) return null;
 
     const bodyObj = body as Record<string, unknown>;
