@@ -18,7 +18,36 @@ describe("Payments", () => {
           expect(typeof payments.customers.cancelSubscriptions).toBe(
             "function",
           );
-          expect(typeof payments.customers.getBalance).toBe("function");
+
+          return true;
+        }).pipe(
+          Effect.provide(Payments.Default.pipe(Layer.provide(MockStripe))),
+        ),
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it("creates a Payments service with products.router", async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const payments = yield* Payments;
+
+          // Verify products.router service exists
+          expect(payments.products).toBeDefined();
+          expect(payments.products.router).toBeDefined();
+          expect(typeof payments.products.router.getUsageMeterBalance).toBe(
+            "function",
+          );
+          expect(typeof payments.products.router.getAvailableBalance).toBe(
+            "function",
+          );
+          expect(typeof payments.products.router.chargeUsageMeter).toBe(
+            "function",
+          );
+          expect(typeof payments.products.router.reserveFunds).toBe("function");
+          expect(typeof payments.products.router.settleFunds).toBe("function");
+          expect(typeof payments.products.router.releaseFunds).toBe("function");
 
           return true;
         }).pipe(
@@ -40,14 +69,12 @@ describe("Payments", () => {
             update,
             delete: del,
             cancelSubscriptions,
-            getBalance,
           } = payments.customers;
 
           expect(typeof create).toBe("function");
           expect(typeof update).toBe("function");
           expect(typeof del).toBe("function");
           expect(typeof cancelSubscriptions).toBe("function");
-          expect(typeof getBalance).toBe("function");
 
           return true;
         }).pipe(
@@ -71,7 +98,6 @@ describe("Payments", () => {
           expect(keys).toContain("update");
           expect(keys).toContain("delete");
           expect(keys).toContain("cancelSubscriptions");
-          expect(keys).toContain("getBalance");
 
           return true;
         }).pipe(
@@ -114,6 +140,7 @@ describe("Payments", () => {
       const layer = Payments.Live({
         apiKey: "sk_test_key",
         routerPriceId: "price_test",
+        routerMeterId: "meter_test",
       });
 
       // Verify it returns a Layer

@@ -1093,12 +1093,12 @@
         }
       }
     },
-    "/organizations/{id}/credits": {
+    "/organizations/{id}/router-balance": {
       "get": {
         "tags": [
           "organizations"
         ],
-        "operationId": "organizations.credits",
+        "operationId": "organizations.routerBalance",
         "parameters": [
           {
             "name": "id",
