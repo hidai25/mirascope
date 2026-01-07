@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Effect } from "effect";
-import {
-  proxyToProvider,
-  extractProviderPath,
-  extractModelFromRequest,
-} from "@/api/router/proxy";
+import { proxyToProvider, extractProviderPath } from "@/api/router/proxy";
 import { PROVIDER_CONFIGS } from "@/api/router/providers";
 import { ProxyError } from "@/errors";
 
@@ -37,36 +33,6 @@ describe("Proxy", () => {
     it("should return original path if prefix doesn't match", () => {
       const path = extractProviderPath("/some/other/path", "openai");
       expect(path).toBe("/some/other/path");
-    });
-  });
-
-  describe("extractModelFromRequest", () => {
-    it("should extract model from valid request body", () => {
-      const body = { model: "gpt-4o-mini", messages: [] };
-      const model = extractModelFromRequest(body);
-      expect(model).toBe("gpt-4o-mini");
-    });
-
-    it("should return null for body without model", () => {
-      const body = { messages: [] };
-      const model = extractModelFromRequest(body);
-      expect(model).toBeNull();
-    });
-
-    it("should return null for null body", () => {
-      const model = extractModelFromRequest(null);
-      expect(model).toBeNull();
-    });
-
-    it("should return null for non-object body", () => {
-      const model = extractModelFromRequest("not an object");
-      expect(model).toBeNull();
-    });
-
-    it("should return null for non-string model", () => {
-      const body = { model: 123 };
-      const model = extractModelFromRequest(body);
-      expect(model).toBeNull();
     });
   });
 
@@ -193,6 +159,68 @@ describe("Proxy", () => {
 
       expect(result.response).toBeDefined();
       expect(result.body).toBeNull();
+    });
+
+    it("should return bodyPromise and onUsage for streaming responses", async () => {
+      const sseData = `data: {"id":"1","choices":[{"text":"Hello"}]}\n\ndata: {"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n`;
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sseData));
+          controller.close();
+        },
+      });
+
+      const mockResponse = {
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "text/event-stream" }),
+        body: stream,
+      };
+
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(mockResponse) as unknown as typeof fetch;
+
+      const request = new Request(
+        "http://localhost/router/v0/openai/v1/chat/completions",
+        {
+          method: "POST",
+          body: JSON.stringify({ model: "gpt-4", messages: [], stream: true }),
+        },
+      );
+
+      const result = await Effect.runPromise(
+        proxyToProvider(
+          request,
+          {
+            ...PROVIDER_CONFIGS.openai,
+            apiKey: "test-key",
+          },
+          "openai",
+        ),
+      );
+
+      expect(result.response).toBeDefined();
+      expect(result.body).toBeNull();
+      expect(result.bodyPromise).toBeDefined();
+      expect(result.onUsage).toBeDefined();
+
+      // Verify onUsage callback works
+      let capturedUsage: unknown = null;
+      result.onUsage?.((usage) => {
+        capturedUsage = usage;
+      });
+
+      // Read the stream to trigger parsing
+      await result.response.text();
+      const bodyResult = await result.bodyPromise;
+
+      expect(bodyResult).toBeDefined();
+      expect(capturedUsage).toBeDefined();
+      expect(
+        (bodyResult as { usage?: { prompt_tokens: number } }).usage
+          ?.prompt_tokens,
+      ).toBe(10);
     });
 
     it("should handle response without content-type header", async () => {

@@ -214,6 +214,93 @@ describe("CostCalculator", () => {
       expect(result?.cost.outputCost).toBe(0.0003); // 500 / 1M * 0.6
       expect(result?.cost.totalCost).toBe(0.00045);
     });
+
+    it("should extract usage from OpenAI Responses API streaming chunk", () => {
+      const calculator = new OpenAICostCalculator();
+      const chunk = {
+        type: "response.completed",
+        response: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+    });
+
+    it("should extract usage with cache tokens from OpenAI Responses API streaming chunk", () => {
+      const calculator = new OpenAICostCalculator();
+      const chunk = {
+        type: "response.completed",
+        response: {
+          usage: {
+            input_tokens: 100,
+            output_tokens: 50,
+            input_tokens_details: {
+              cached_tokens: 30,
+            },
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+      expect(usage?.cacheReadTokens).toBe(30);
+    });
+
+    it("should extract usage from OpenAI Completions API streaming chunk", () => {
+      const calculator = new OpenAICostCalculator();
+      const chunk = {
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 50,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+    });
+
+    it("should extract usage with cache tokens from OpenAI Completions API streaming chunk", () => {
+      const calculator = new OpenAICostCalculator();
+      const chunk = {
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 50,
+          prompt_tokens_details: {
+            cached_tokens: 30,
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+      expect(usage?.cacheReadTokens).toBe(30);
+    });
+
+    it("should return null for OpenAI Responses API chunk without usage", () => {
+      const calculator = new OpenAICostCalculator();
+      const chunk = {
+        type: "response.completed",
+        response: {
+          id: "resp_123",
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeNull();
+    });
   });
 
   describe("AnthropicCostCalculator", () => {
@@ -376,6 +463,114 @@ describe("CostCalculator", () => {
       // Cost: 2100 tokens / 1M * 1.25 (5m price) = 0.002625
       expect(result?.cost.cacheWriteCost).toBeCloseTo(0.002625, 6);
     });
+
+    it("should extract usage from Anthropic streaming chunk (message_stop)", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_stop",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+    });
+
+    it("should extract usage from Anthropic streaming chunk (message_delta)", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_delta",
+        usage: {
+          output_tokens: 5,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      // Note: message_delta may not have input_tokens, only output_tokens
+      expect(usage?.outputTokens).toBe(5);
+    });
+
+    it("should extract usage with cache tokens from Anthropic streaming chunk", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_stop",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_read_input_tokens: 30,
+          cache_creation_input_tokens: 20,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+      expect(usage?.cacheReadTokens).toBe(30);
+      expect(usage?.cacheWriteTokens).toBe(20);
+    });
+
+    it("should extract and normalize 5m cache tokens from Anthropic streaming chunk", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_stop",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 500,
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.cacheWriteTokens).toBe(500);
+    });
+
+    it("should extract and normalize 1h cache tokens from Anthropic streaming chunk", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_stop",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation: {
+            ephemeral_1h_input_tokens: 1000,
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      // 1h tokens normalized: 1000 * 1.6 = 1600
+      expect(usage?.cacheWriteTokens).toBe(1600);
+    });
+
+    it("should extract and normalize mixed 5m + 1h cache tokens from Anthropic streaming chunk", () => {
+      const calculator = new AnthropicCostCalculator();
+      const chunk = {
+        type: "message_stop",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 500,
+            ephemeral_1h_input_tokens: 1000,
+          },
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      // Normalized: 500 (5m) + 1000 * 1.6 (1h) = 500 + 1600 = 2100
+      expect(usage?.cacheWriteTokens).toBe(2100);
+    });
   });
 
   describe("GoogleCostCalculator", () => {
@@ -455,6 +650,61 @@ describe("CostCalculator", () => {
 
       expect(result).toBeDefined();
       expect(result?.usage.cacheReadTokens).toBe(30);
+    });
+
+    it("should extract usage from Google streaming chunk", () => {
+      const calculator = new GoogleCostCalculator();
+      const chunk = {
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 50,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+    });
+
+    it("should extract usage with cache tokens from Google streaming chunk", () => {
+      const calculator = new GoogleCostCalculator();
+      const chunk = {
+        usageMetadata: {
+          promptTokenCount: 100,
+          candidatesTokenCount: 50,
+          cachedContentTokenCount: 30,
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeDefined();
+      expect(usage?.inputTokens).toBe(100);
+      expect(usage?.outputTokens).toBe(50);
+      expect(usage?.cacheReadTokens).toBe(30);
+    });
+
+    it("should return null for Google streaming chunk without usageMetadata", () => {
+      const calculator = new GoogleCostCalculator();
+      const chunk = {
+        candidates: [{ content: { parts: [{ text: "Hello" }] } }],
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeNull();
+    });
+
+    it("should return null for Google streaming chunk with incomplete usageMetadata", () => {
+      const calculator = new GoogleCostCalculator();
+      const chunk = {
+        usageMetadata: {
+          totalTokenCount: 150,
+          // Missing required promptTokenCount and candidatesTokenCount
+        },
+      };
+
+      const usage = calculator.extractUsageFromStreamChunk(chunk);
+      expect(usage).toBeNull();
     });
   });
 
